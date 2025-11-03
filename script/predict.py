@@ -5,13 +5,14 @@ from models.unet3d import UNet3D
 import SimpleITK as sitk
 from datetime import datetime
 
-def load_multimodal_images(case_dir):
+def load_multimodal_images(case_dir, handle_missing='zero_fill'):
     """加载多模态MRI图像
     
     从指定目录加载五种模态的MRI图像数据
     
     参数:
         case_dir (str): 病例数据目录，应包含ADC, DWI, T2 fs, T2 not fs, gaoqing-T2等子目录
+        handle_missing (str): 处理缺失模态的方法
         
     返回:
         tuple: (images, modality_names) 其中images是numpy数组，modality_names是模态名称列表
@@ -24,6 +25,7 @@ def load_multimodal_images(case_dir):
     modality_images = []
     
     # 遍历每种模态
+    reference_image = None
     for modality in modalities:
         # 构建模态目录路径
         modality_dir = os.path.join(case_dir, modality)
@@ -33,27 +35,47 @@ def load_multimodal_images(case_dir):
         # 获取该模态下的.nii文件
         nii_files = [f for f in os.listdir(modality_dir) if f.endswith('.nii')]
         if not nii_files:
-            raise FileNotFoundError(f"在 {modality_dir} 中未找到.nii文件")
+            # 处理缺失模态的情况
+            if handle_missing == 'zero_fill':
+                # 使用零填充
+                if reference_image is not None:
+                    img = np.zeros_like(reference_image, dtype=np.float32)
+                else:
+                    # 如果还没有参考图像，则创建一个默认大小的零图像
+                    img = np.zeros((64, 64, 64), dtype=np.float32)
+                print(f"警告: 模态 {modality} 缺失，使用零填充")
+            elif handle_missing == 'skip':
+                raise FileNotFoundError(f"在 {modality_dir} 中未找到.nii文件")
+            elif handle_missing == 'duplicate' and reference_image is not None:
+                # 使用参考图像填充
+                img = reference_image.copy()
+                print(f"警告: 模态 {modality} 缺失，使用参考模态填充")
+            else:
+                raise FileNotFoundError(f"在 {modality_dir} 中未找到.nii文件")
+        else:
+            # 如果找到多个.nii文件，给出警告并使用第一个文件
+            if len(nii_files) > 1:
+                print(f"警告: 在 {modality_dir} 中找到多个.nii文件，将使用第一个文件")
+                
+            # 加载图像
+            filepath = os.path.join(modality_dir, nii_files[0])
+            sitk_image = sitk.ReadImage(filepath)
+            img = sitk.GetArrayFromImage(sitk_image)
             
-        # 如果找到多个.nii文件，给出警告并使用第一个文件
-        if len(nii_files) > 1:
-            print(f"警告: 在 {modality_dir} 中找到多个.nii文件，将使用第一个文件")
-            
-        # 加载图像
-        filepath = os.path.join(modality_dir, nii_files[0])
-        sitk_image = sitk.ReadImage(filepath)
-        image_array = sitk.GetArrayFromImage(sitk_image)
+            # 保存第一个存在的模态作为参考图像
+            if reference_image is None:
+                reference_image = img
         
         # 预处理图像数据
-        image_array = image_array.astype(np.float32)
+        img = img.astype(np.float32)
         # 归一化到[0,1]范围
-        if image_array.max() - image_array.min() != 0:
-            image_array = (image_array - image_array.min()) / (image_array.max() - image_array.min())
+        if img.max() - img.min() != 0:
+            img = (img - img.min()) / (img.max() - img.min())
         else:
-            image_array = np.zeros_like(image_array, dtype=np.float32)
+            img = np.zeros_like(img, dtype=np.float32)
             
         # 添加到模态图像列表
-        modality_images.append(image_array)
+        modality_images.append(img)
     
     # 将多个模态的图像堆叠在一起，形成(5, D, H, W)的数组
     image = np.stack(modality_images, axis=0)
@@ -181,9 +203,12 @@ def main():
         'model_path': '',  # 需要指定模型文件路径
         'case_dir': '',    # 需要指定病例数据目录
         'output_dir': os.path.join('results', f"inference_{datetime.now().strftime('%Y%m%d_%H%M%S')}"),
-        'device': 'cuda' if torch.cuda.is_available() else 'cpu'
-    }
+        'device': 'cuda' if torch.cuda.is_available() else 'cpu',
+        'handle_missing_modalities': 'zero_fill'  # 处理缺失模态的方法
+   
     
+ }
+
     # 检查必要参数
     if not config['model_path'] or not os.path.exists(config['model_path']):
         print("请在config中指定有效的模型文件路径!")
@@ -203,7 +228,10 @@ def main():
     
     # 加载多模态图像
     print("正在加载多模态MRI图像...")
-    image, modalities = load_multimodal_images(config['case_dir'])
+    image, modalities = load_multimodal_images(
+        config['case_dir'], 
+        handle_missing=config['handle_missing_modalities']
+    )
     print(f"已加载 {len(modalities)} 个模态: {', '.join(modalities)}")
     print(f"图像形状: {image.shape}")
     

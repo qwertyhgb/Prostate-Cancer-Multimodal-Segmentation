@@ -72,6 +72,7 @@ class ModelValidator:
                 - device: 设备 ('cuda' or 'cpu')
                 - data_type: 数据类型 ('BPH' 或 'PCA')
                 - save_dir: 结果保存目录
+                - handle_missing_modalities: 处理缺失模态的方法
         """
         self.config = config
         # 设置设备
@@ -80,12 +81,16 @@ class ModelValidator:
         # 加载模型
         self.model = self._load_model()
         
+        # 获取处理缺失模态的策略
+        handle_missing = config.get('handle_missing_modalities', 'zero_fill')
+        
         # 创建测试数据加载器
         self.test_loader = get_dataloader(
             config['data_dir'],
             batch_size=config['batch_size'],
             mode='test',
-            data_type=config.get('data_type', 'BPH')
+            data_type=config.get('data_type', 'BPH'),
+            handle_missing_modalities=handle_missing
         )
         
         # 创建保存目录
@@ -204,6 +209,7 @@ def main():
         'batch_size': 1,
         'device': 'cuda' if torch.cuda.is_available() else 'cpu',
         'data_type': 'BPH',
+        'handle_missing_modalities': 'zero_fill',  # 处理缺失模态的方法
         'save_dir': os.path.join('results', f"validation_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
     }
     

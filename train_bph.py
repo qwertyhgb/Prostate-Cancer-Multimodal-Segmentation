@@ -74,6 +74,7 @@ class BPHTrainer:
                 - device: 训练设备 ('cuda' or 'cpu')
                 - save_dir: 模型保存目录
                 - data_type: 数据类型 ('BPH' 或 'PCA')
+                - handle_missing_modalities: 处理缺失模态的方法
         """
         self.config = config
         # 设置训练设备（GPU或CPU）
@@ -105,12 +106,16 @@ class BPHTrainer:
             verbose=True     # 打印学习率调整信息
         )
         
+        # 获取处理缺失模态的策略
+        handle_missing = config.get('handle_missing_modalities', 'zero_fill')
+        
         # 创建训练数据加载器
         self.train_loader = get_dataloader(
             config['data_dir'],
             batch_size=config['batch_size'],
             mode='train',
-            data_type=config.get('data_type', 'BPH')  # 默认使用BPH数据
+            data_type=config.get('data_type', 'BPH'),  # 默认使用BPH数据
+            handle_missing_modalities=handle_missing
         )
         
         # 创建验证数据加载器（如果有验证集）
@@ -120,7 +125,8 @@ class BPHTrainer:
                 config['data_dir'],
                 batch_size=config['batch_size'],
                 mode='test',  # 假设测试模式即为验证模式
-                data_type=config.get('data_type', 'BPH')
+                data_type=config.get('data_type', 'BPH'),
+                handle_missing_modalities=handle_missing
             )
         
         # 创建保存目录
@@ -240,6 +246,8 @@ class BPHTrainer:
     def train(self):
         """完整的训练流程"""
         print(f"开始训练 {self.config.get('data_type', 'BPH')} 数据...")
+        handle_method = self.config.get('handle_missing_modalities', 'zero_fill')
+        print(f"处理缺失模态的方法: {handle_method}")
         print("注意：对于小数据集（如240例），建议使用 train_bph_cv.py 中的交叉验证版本，")
         print("以更好地利用数据并获得更稳定的模型性能评估。")
         # 初始化最佳损失为无穷大
@@ -287,6 +295,7 @@ def main():
         'device': 'cuda' if torch.cuda.is_available() else 'cpu',  # 设备
         'data_type': 'BPH',                    # 数据类型
         'validation': False,                   # 是否使用验证集
+        'handle_missing_modalities': 'zero_fill',  # 处理缺失模态的方法
         'save_dir': os.path.join('checkpoints', f"BPH_{datetime.now().strftime('%Y%m%d_%H%M%S')}")  # 模型保存目录
     }
     

@@ -76,19 +76,23 @@ class BPHCVTrainer:
                 - save_dir: 模型保存目录
                 - data_type: 数据类型 ('BPH' 或 'PCA')
                 - n_splits: 交叉验证折数
+                - handle_missing_modalities: 处理缺失模态的方法
         """
         self.config = config
         # 设置训练设备（GPU或CPU）
         self.device = torch.device(config['device'])
         # 获取交叉验证折数
         self.n_splits = config.get('n_splits', 5)
+        # 获取处理缺失模态的策略
+        self.handle_missing = config.get('handle_missing_modalities', 'zero_fill')
         
         # 获取交叉验证分割
         # 将数据集分割为K个不重叠的子集
         self.splits = get_kfold_splits(
             config['data_dir'],
             data_type=config.get('data_type', 'BPH'),
-            n_splits=self.n_splits
+            n_splits=self.n_splits,
+            handle_missing_modalities=self.handle_missing
         )
         
         # 记录每折的最好结果
@@ -159,6 +163,7 @@ class BPHCVTrainer:
         print(f"\n{'='*50}")
         print(f"开始训练第 {fold_idx + 1}/{self.n_splits} 折")
         print(f"训练集大小: {len(train_indices)}, 验证集大小: {len(val_indices)}")
+        print(f"处理缺失模态的方法: {self.handle_missing}")
         print(f"{'='*50}")
         
         # 创建模型、优化器和调度器
@@ -175,7 +180,8 @@ class BPHCVTrainer:
             batch_size=self.config['batch_size'],
             mode='train',
             data_type=self.config.get('data_type', 'BPH'),
-            fold_indices=train_indices
+            fold_indices=train_indices,
+            handle_missing_modalities=self.handle_missing
         )
         
         # 验证数据加载器
@@ -184,7 +190,8 @@ class BPHCVTrainer:
             batch_size=self.config['batch_size'],
             mode='test',
             data_type=self.config.get('data_type', 'BPH'),
-            fold_indices=val_indices
+            fold_indices=val_indices,
+            handle_missing_modalities=self.handle_missing
         )
         
         # 初始化最佳验证损失
@@ -343,6 +350,7 @@ class BPHCVTrainer:
         对每一折进行训练和验证，最后汇总结果
         """
         print(f"开始 {self.n_splits} 折交叉验证训练 {self.config.get('data_type', 'BPH')} 数据...")
+        print(f"处理缺失模态的方法: {self.handle_missing}")
         
         # 存储所有折的结果
         all_fold_results = []
@@ -388,6 +396,7 @@ def main():
         'device': 'cuda' if torch.cuda.is_available() else 'cpu',  # 设备
         'data_type': 'BPH',                    # 数据类型
         'n_splits': 5,                         # 5折交叉验证
+        'handle_missing_modalities': 'zero_fill',  # 处理缺失模态的方法
         'save_dir': os.path.join('checkpoints', f"BPH_CV_{datetime.now().strftime('%Y%m%d_%H%M%S')}")  # 模型保存目录
     }
     
