@@ -23,7 +23,7 @@ from tqdm import tqdm
 from models.unet3d import UNet3D
 from utils.losses import DiceLoss
 from utils.trainer import BaseTrainer
-from script.data_loader import get_dataloader
+from script.data_loader import get_dataloader, get_kfold_splits
 import os
 from datetime import datetime
 import json
