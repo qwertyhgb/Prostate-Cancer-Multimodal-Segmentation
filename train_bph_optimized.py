@@ -20,7 +20,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 from tqdm import tqdm
 from models.unet3d import UNet3D
 from utils.losses import DiceLoss
@@ -245,7 +245,7 @@ class CrossValidationTrainer:
         )
         
         # 初始化混合精度训练的梯度缩放器
-        scaler = GradScaler()
+        scaler = GradScaler('cuda')
         
         # 训练循环
         best_val_loss = float('inf')  # 初始化最佳验证损失
@@ -266,7 +266,7 @@ class CrossValidationTrainer:
                     optimizer.zero_grad()
                     
                     # 使用自动混合精度
-                    with autocast():
+                    with autocast('cuda'):
                         outputs = model(images)
                         
                         # 确保输出和标签的形状匹配
@@ -313,7 +313,7 @@ class CrossValidationTrainer:
                         labels = batch['label'].to(self.device)
                         
                         # 使用自动混合精度进行推理
-                        with autocast():
+                        with autocast('cuda'):
                             outputs = model(images)
                             
                             # 确保输出和标签的形状匹配
