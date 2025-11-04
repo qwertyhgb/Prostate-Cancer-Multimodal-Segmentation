@@ -1,3 +1,14 @@
+"""
+BPH数据训练脚本 - 专门用于良性前列腺增生(BPH)数据的模型训练
+
+该脚本提供BPH数据专用的训练流程，包括模型配置、数据加载、训练循环和模型保存。
+特别针对小数据集（240例）提供训练建议，推荐使用交叉验证版本以获得更稳定的性能评估。
+
+作者: [项目作者]
+版本: 1.0
+创建时间: [项目创建时间]
+"""
+
 import os
 import torch
 import torch.nn as nn
@@ -9,26 +20,47 @@ from script.data_loader import get_dataloader
 import numpy as np
 from datetime import datetime
 
+
 class BPHTrainer:
     """BPH数据专用模型训练器
     
-    注意：对于小数据集（如240例），建议使用 train_bph_cv.py 中的交叉验证版本，
-    以更好地利用数据并获得更稳定的模型性能评估。
+    专门针对良性前列腺增生(BPH)数据设计的训练器类，
+    提供完整的训练流程管理，包括数据加载、模型训练、验证和保存。
+    
+    重要提示:
+    - 对于小数据集（如240例），强烈建议使用 train_bph_cv.py 中的交叉验证版本
+    - 交叉验证能更好地利用有限数据，获得更稳定的模型性能评估
+    - 本脚本适合快速原型验证和基础训练
+    
+    特性:
+    - 完整的训练和验证流程
+    - 自动学习率调度
+    - 模型检查点保存
+    - 梯度裁剪防止梯度爆炸
+    - 训练历史记录
     """
     def __init__(self, config):
         """
         初始化BPH训练器
         
         参数:
-            config: 训练配置字典
-                - data_dir: 数据集根目录
-                - num_epochs: 训练轮数
-                - batch_size: 批次大小
-                - learning_rate: 学习率
-                - device: 训练设备 ('cuda' or 'cpu')
-                - save_dir: 模型保存目录
-                - data_type: 数据类型 ('BPH' 或 'PCA')
-                - handle_missing_modalities: 处理缺失模态的方法
+            config (dict): 训练配置字典，包含以下键值:
+                - data_dir (str): 数据集根目录路径
+                - num_epochs (int): 训练总轮数
+                - batch_size (int): 每个批次的样本数量
+                - learning_rate (float): 优化器学习率
+                - device (str): 训练设备 ('cuda' 或 'cpu')
+                - save_dir (str): 模型和检查点保存目录
+                - data_type (str): 数据类型 ('BPH' 或 'PCA')
+                - handle_missing_modalities (str): 处理缺失模态的方法
+                - validation (bool): 是否启用验证集验证
+        
+        初始化流程:
+        1. 设置训练设备和配置参数
+        2. 创建3D U-Net模型实例
+        3. 配置损失函数和优化器
+        4. 创建数据加载器
+        5. 创建保存目录和训练历史记录
         """
         self.config = config
         # 设置训练设备（GPU或CPU）
@@ -97,6 +129,15 @@ class BPHTrainer:
         
         返回:
             float: 该epoch的平均训练损失
+            
+        训练流程:
+        1. 设置模型为训练模式
+        2. 遍历训练数据加载器
+        3. 前向传播计算输出
+        4. 计算损失并反向传播
+        5. 应用梯度裁剪
+        6. 更新模型参数
+        7. 更新进度条显示
         """
         # 设置模型为训练模式
         self.model.train()
@@ -121,6 +162,7 @@ class BPHTrainer:
                 loss.backward()
                 
                 # 梯度裁剪，防止梯度爆炸
+                # 限制梯度范数不超过1.0，提高训练稳定性
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 
                 # 更新模型参数
@@ -137,6 +179,13 @@ class BPHTrainer:
         
         返回:
             float or None: 该epoch的平均验证损失，如果没有验证集则返回None
+            
+        验证流程:
+        1. 设置模型为评估模式
+        2. 禁用梯度计算以节省内存
+        3. 遍历验证数据加载器
+        4. 计算验证损失
+        5. 更新进度条显示
         """
         # 如果没有验证集，直接返回None
         if self.val_loader is None:
@@ -170,6 +219,16 @@ class BPHTrainer:
             epoch (int): 当前epoch数
             loss (float): 当前损失值
             is_best (bool): 是否为最佳模型
+            
+        保存内容:
+        - 模型状态字典
+        - 优化器状态字典
+        - 调度器状态字典
+        - 当前epoch和损失
+        
+        文件命名:
+        - 最新检查点: latest_checkpoint.pth
+        - 最佳模型: best_model_epoch_{epoch}.pth
         """
         # 构建检查点字典
         checkpoint = {
@@ -198,12 +257,26 @@ class BPHTrainer:
             print(f"最佳模型已保存至: {best_path}")
     
     def train(self):
-        """完整的训练流程"""
+        """完整的训练流程
+        
+        训练流程:
+        1. 打印训练配置信息和重要提示
+        2. 循环训练指定轮数
+        3. 每个epoch进行训练和验证
+        4. 更新学习率调度器
+        5. 保存最佳模型检查点
+        6. 记录训练历史
+        
+        重要提示:
+        - 对于小数据集，推荐使用交叉验证版本
+        - 本脚本适合快速原型验证
+        """
         print(f"开始训练 {self.config.get('data_type', 'BPH')} 数据...")
         handle_method = self.config.get('handle_missing_modalities', 'zero_fill')
         print(f"处理缺失模态的方法: {handle_method}")
         print("注意：对于小数据集（如240例），建议使用 train_bph_cv.py 中的交叉验证版本，")
         print("以更好地利用数据并获得更稳定的模型性能评估。")
+        
         # 初始化最佳损失为无穷大
         best_loss = float('inf')
         
@@ -238,8 +311,21 @@ class BPHTrainer:
             
         print(f"\n训练完成! 最佳损失: {best_loss:.4f}")
 
+
 def main():
-    """主函数"""
+    """主函数 - 配置和启动BPH数据训练
+    
+    功能:
+    - 设置训练配置参数
+    - 创建训练器实例
+    - 启动训练流程
+    
+    配置说明:
+    - 默认使用BPH数据类型
+    - 自动检测CUDA设备
+    - 创建时间戳命名的保存目录
+    - 使用zero_fill处理缺失模态
+    """
     # 训练配置参数
     config = {
         'data_dir': 'data',                    # 数据集目录
@@ -256,6 +342,7 @@ def main():
     # 创建训练器并开始训练
     trainer = BPHTrainer(config)
     trainer.train()
+
 
 if __name__ == '__main__':
     main()

@@ -1,3 +1,14 @@
+"""
+模型验证脚本 - 用于评估训练好的3D U-Net模型在测试集上的性能
+
+该脚本提供完整的模型验证流程，包括模型加载、测试数据评估、性能指标计算和结果保存。
+支持Dice系数和IoU等医学图像分割常用评估指标的计算和统计。
+
+作者: [项目作者]
+版本: 1.0
+创建时间: [项目创建时间]
+"""
+
 import os
 import torch
 import numpy as np
@@ -9,56 +20,93 @@ import SimpleITK as sitk
 from datetime import datetime
 import json
 
+
 def calculate_dice_score(pred, target):
     """计算Dice系数
     
-    Dice系数用于衡量两个样本的相似性，值越接近1表示越相似
+    Dice系数是医学图像分割中最常用的评估指标之一，
+    用于衡量预测分割结果与真实标签之间的相似度。
+    
+    数学公式:
+        Dice = (2 * |X ∩ Y|) / (|X| + |Y|)
     
     参数:
-        pred (torch.Tensor): 预测结果
-        target (torch.Tensor): 真实标签
+        pred (torch.Tensor): 预测结果，二值分割图（0或1）
+        target (torch.Tensor): 真实标签，二值分割图（0或1）
         
     返回:
-        float: Dice系数
+        float: Dice系数，范围[0,1]，值越大表示分割效果越好
+        
+    特性:
+    - 对类别不平衡不敏感
+    - 直接评估分割边界质量
+    - 值域为[0,1]，1表示完美分割
     """
-    # 展平张量
+    # 展平张量，将多维张量转换为一维向量
+    # 便于计算交集和并集
     pred = pred.view(-1)
     target = target.view(-1)
     
-    # 计算交集
+    # 计算交集（预测值和真实值的元素级乘积之和）
     intersection = (pred * target).sum()
+    
     # 计算Dice系数
+    # 分子: 2倍交集
+    # 分母: 预测值总和 + 真实值总和 + 平滑因子（防止除零）
     dice = (2. * intersection) / (pred.sum() + target.sum() + 1e-8)
     return dice.item()
+
 
 def calculate_iou(pred, target):
     """计算IoU (Intersection over Union)
     
-    IoU也称为Jaccard指数，用于衡量两个样本的重叠程度
+    IoU也称为Jaccard指数，用于衡量两个样本的重叠程度，
+    在目标检测和图像分割任务中广泛使用。
+    
+    数学公式:
+        IoU = |X ∩ Y| / |X ∪ Y|
     
     参数:
-        pred (torch.Tensor): 预测结果
-        target (torch.Tensor): 真实标签
+        pred (torch.Tensor): 预测结果，二值分割图（0或1）
+        target (torch.Tensor): 真实标签，二值分割图（0或1）
         
     返回:
-        float: IoU值
+        float: IoU值，范围[0,1]，值越大表示重叠度越高
+        
+    特性:
+    - 衡量预测区域与真实区域的重叠比例
+    - 对分割边界的精确度敏感
+    - 值域为[0,1]，1表示完全重叠
     """
-    # 展平张量
+    # 展平张量，将多维张量转换为一维向量
     pred = pred.view(-1)
     target = target.view(-1)
     
-    # 计算交集
+    # 计算交集（预测值和真实值的元素级乘积之和）
     intersection = (pred * target).sum()
-    # 计算并集
+    
+    # 计算并集（预测值总和 + 真实值总和 - 交集）
     union = pred.sum() + target.sum() - intersection
+    
     # 计算IoU
+    # 分子: 交集
+    # 分母: 并集 + 平滑因子（防止除零）
     iou = intersection / (union + 1e-8)
     return iou.item()
+
 
 class ModelValidator:
     """模型验证器
     
-    用于评估训练好的模型在测试集上的性能
+    专门用于评估训练好的3D U-Net模型在测试集上的性能，
+    提供完整的验证流程管理和结果统计分析。
+    
+    功能特性:
+    - 自动加载训练好的模型权重
+    - 批量处理测试数据
+    - 计算多种评估指标（Dice系数、IoU等）
+    - 保存详细的验证结果
+    - 支持病例级别的性能分析
     """
     
     def __init__(self, config):
@@ -66,17 +114,23 @@ class ModelValidator:
         初始化模型验证器
         
         参数:
-            config: 配置字典
-                - model_path: 模型文件路径
-                - data_dir: 数据集目录
-                - batch_size: 批次大小
-                - device: 设备 ('cuda' or 'cpu')
-                - data_type: 数据类型 ('BPH' 或 'PCA')
-                - save_dir: 结果保存目录
-                - handle_missing_modalities: 处理缺失模态的方法
+            config (dict): 验证配置字典，包含以下键值:
+                - model_path (str): 模型文件路径（必需）
+                - data_dir (str): 数据集根目录路径
+                - batch_size (int): 批次大小
+                - device (str): 验证设备 ('cuda' 或 'cpu')
+                - data_type (str): 数据类型 ('BPH' 或 'PCA')
+                - save_dir (str): 结果保存目录
+                - handle_missing_modalities (str): 处理缺失模态的方法
+        
+        初始化流程:
+        1. 设置验证设备和配置参数
+        2. 加载训练好的模型
+        3. 创建测试数据加载器
+        4. 创建结果保存目录
         """
         self.config = config
-        # 设置设备
+        # 设置设备（GPU或CPU）
         self.device = torch.device(config['device'])
         
         # 加载模型
@@ -101,7 +155,13 @@ class ModelValidator:
         """加载训练好的模型
         
         返回:
-            UNet3D: 加载的模型实例
+            UNet3D: 加载完成的模型实例，设置为评估模式
+            
+        加载流程:
+        1. 创建模型架构实例
+        2. 从检查点文件加载权重
+        3. 设置模型为评估模式
+        4. 返回配置好的模型
         """
         print("正在加载模型...")
         # 创建模型实例
@@ -113,13 +173,14 @@ class ModelValidator:
         # 加载模型权重
         checkpoint = torch.load(self.config['model_path'], map_location=self.device)
         if 'model_state_dict' in checkpoint:
-            # 如果检查点包含模型状态字典
+            # 如果检查点包含模型状态字典（完整检查点格式）
             model.load_state_dict(checkpoint['model_state_dict'])
         else:
-            # 如果检查点直接是模型状态字典
+            # 如果检查点直接是模型状态字典（仅模型权重格式）
             model.load_state_dict(checkpoint)
             
         # 设置为评估模式
+        # 禁用dropout和batch normalization的随机性
         model.eval()
         print("模型加载完成!")
         return model
@@ -127,10 +188,19 @@ class ModelValidator:
     def validate(self):
         """验证模型性能
         
-        在测试集上评估模型性能，计算Dice系数和IoU等指标
+        在测试集上评估模型性能，计算Dice系数和IoU等指标，
+        并保存详细的验证结果。
         
         返回:
             tuple: (平均Dice系数, 平均IoU)
+            
+        验证流程:
+        1. 初始化统计变量和结果存储
+        2. 遍历测试数据加载器
+        3. 对每个批次进行模型预测
+        4. 计算每个病例的评估指标
+        5. 统计平均性能指标
+        6. 保存详细结果到JSON文件
         """
         print("开始模型验证...")
         
@@ -142,9 +212,9 @@ class ModelValidator:
         # 存储每个病例的结果
         results = []
         
-        # 关闭梯度计算
+        # 关闭梯度计算以节省内存和计算资源
         with torch.no_grad():
-            # 遍历测试数据
+            # 遍历测试数据，使用进度条显示验证进度
             for batch in tqdm(self.test_loader, desc='验证模型'):
                 # 将数据移动到指定设备
                 images = batch['image'].to(self.device)
@@ -152,12 +222,14 @@ class ModelValidator:
                 case_ids = batch['case_id']
                 
                 # 模型预测
+                # 使用predict方法获得概率图，然后二值化
                 outputs = self.model.predict(images)
                 
                 # 计算评估指标
                 for i in range(outputs.shape[0]):
-                    # 二值化预测结果
+                    # 二值化预测结果（阈值0.5）
                     pred = (outputs[i] > 0.5).float()
+                    
                     # 计算Dice系数和IoU
                     dice = calculate_dice_score(pred, labels[i])
                     iou = calculate_iou(pred, labels[i])
@@ -201,11 +273,24 @@ class ModelValidator:
         print(f"详细结果已保存至: {results_path}")
         return avg_dice, avg_iou
 
+
 def main():
-    """主函数"""
+    """主函数 - 配置和启动模型验证流程
+    
+    功能:
+    - 设置验证配置参数
+    - 检查模型文件有效性
+    - 创建验证器实例
+    - 执行验证流程
+    
+    使用说明:
+    1. 修改config['model_path']为实际的模型文件路径
+    2. 根据需要调整其他配置参数
+    3. 运行脚本进行模型验证
+    """
     # 验证配置参数
     config = {
-        'model_path': '',  # 需要指定模型文件路径
+        'model_path': '',  # 需要指定模型文件路径（必需）
         'data_dir': 'data',
         'batch_size': 1,
         'device': 'cuda' if torch.cuda.is_available() else 'cpu',
@@ -223,6 +308,7 @@ def main():
     # 创建验证器并执行验证
     validator = ModelValidator(config)
     validator.validate()
+
 
 if __name__ == '__main__':
     main()

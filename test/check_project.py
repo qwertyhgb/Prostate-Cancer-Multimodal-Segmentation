@@ -3,6 +3,20 @@
 前列腺多模态MRI分割项目 - 项目状态检查脚本
 
 这个脚本用于检查项目的完整性，包括文件结构、依赖安装、模型状态等。
+通过运行此脚本，用户可以快速了解项目配置状态，发现潜在问题。
+
+功能特性:
+- 文件结构完整性检查
+- Python依赖包检查
+- 模型文件状态检查
+- 数据目录结构验证
+- 自动生成检查报告
+
+使用方式:
+    python check_project.py
+
+作者: [项目作者]
+版本: 1.0
 """
 
 import os
@@ -11,8 +25,25 @@ import importlib
 from datetime import datetime
 import json
 
+
 def check_file_structure():
-    """检查项目文件结构"""
+    """检查项目文件结构完整性
+    
+    验证项目必需的代码文件和目录是否存在，
+    确保项目可以正常加载和运行。
+    
+    检查内容:
+    - 核心模型文件 (models/unet3d.py)
+    - 数据加载器 (script/data_loader.py)
+    - 损失函数模块 (utils/losses.py)
+    - 训练器模块 (utils/trainer.py)
+    - 各种训练脚本
+    - 配置文件示例
+    - 项目依赖文件
+    
+    返回:
+        bool: 文件结构是否完整
+    """
     print("=" * 60)
     print("检查项目文件结构...")
     print("=" * 60)
@@ -79,8 +110,22 @@ def check_file_structure():
         print("  所有必需文件都存在 ✓")
         return True
 
+
 def check_dependencies():
-    """检查项目依赖"""
+    """检查项目Python依赖包
+    
+    验证项目运行所需的Python包是否已正确安装，
+    包括必需依赖和可选依赖。
+    
+    检查内容:
+    - PyTorch框架相关包
+    - 数据处理和可视化包
+    - 医学图像处理包
+    - 开发工具包
+    
+    返回:
+        bool: 依赖包是否完整
+    """
     print("\n" + "=" * 60)
     print("检查项目依赖...")
     print("=" * 60)
@@ -139,8 +184,21 @@ def check_dependencies():
         print("  所有必需依赖都已安装 ✓")
         return True
 
+
 def check_model_files():
-    """检查模型文件"""
+    """检查模型文件状态
+    
+    检查checkpoints目录中的模型文件，
+    包括文件大小、修改时间等信息。
+    
+    检查内容:
+    - 检查点目录是否存在
+    - 模型文件数量和质量
+    - 文件大小和修改时间
+    
+    返回:
+        bool: 模型文件状态是否正常
+    """
     print("\n" + "=" * 60)
     print("检查模型文件...")
     print("=" * 60)
@@ -175,8 +233,22 @@ def check_model_files():
     
     return True
 
+
 def check_data_directory():
-    """检查数据目录"""
+    """检查数据目录结构
+    
+    验证数据目录是否符合项目要求的格式，
+    确保数据可以正确加载和处理。
+    
+    检查内容:
+    - 数据根目录是否存在
+    - BPH-PCA子目录结构
+    - 模态目录完整性
+    - 图像文件数量
+    
+    返回:
+        bool: 数据目录结构是否正常
+    """
     print("\n" + "=" * 60)
     print("检查数据目录...")
     print("=" * 60)
@@ -231,8 +303,22 @@ def check_data_directory():
     
     return True
 
+
 def generate_report():
-    """生成检查报告"""
+    """生成完整的项目检查报告
+    
+    执行所有检查项目，汇总结果并生成JSON格式的报告文件，
+    提供项目状态的全面概览。
+    
+    检查项目:
+    - 文件结构完整性
+    - Python依赖包
+    - 模型文件状态
+    - 数据目录结构
+    
+    返回:
+        bool: 项目总体状态是否正常
+    """
     print("\n" + "=" * 60)
     print("生成检查报告...")
     print("=" * 60)
@@ -296,8 +382,16 @@ def generate_report():
     
     return overall_ok
 
+
 def main():
-    """主函数"""
+    """主函数 - 项目检查入口点
+    
+    协调所有检查流程，生成最终报告，
+    并根据检查结果返回适当的退出码。
+    
+    返回:
+        int: 退出码 (0表示成功，1表示失败)
+    """
     print("前列腺多模态MRI分割项目 - 项目状态检查")
     print("=" * 60)
     
@@ -305,6 +399,7 @@ def main():
     success = generate_report()
     
     return 0 if success else 1
+
 
 if __name__ == '__main__':
     sys.exit(main())

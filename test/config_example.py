@@ -2,6 +2,21 @@
 前列腺多模态MRI分割项目 - 配置文件示例
 
 这个文件包含了所有可用的配置参数，用户可以根据自己的需求进行修改。
+通过预设配置组合，用户可以快速选择适合不同场景的训练配置。
+
+配置类型:
+- 基础训练配置 (BASE_CONFIG): 标准训练参数
+- 交叉验证配置 (CROSS_VALIDATION_CONFIG): 适用于小数据集
+- 快速训练配置 (QUICK_TRAIN_CONFIG): 用于测试和调试
+- 高性能训练配置 (HIGH_PERFORMANCE_CONFIG): 正式训练使用
+- 小数据集配置 (SMALL_DATASET_CONFIG): 数据量较少时使用
+
+使用方式:
+    from config_example import get_config
+    config = get_config('standard')  # 获取标准配置
+
+作者: [项目作者]
+版本: 1.0
 """
 
 import torch
@@ -139,9 +154,12 @@ PRESET_CONFIGS = {
     'small_dataset': SMALL_DATASET_CONFIG,       # 小数据集
 }
 
+
 def get_config(preset='standard', **kwargs):
-    """
-    获取配置
+    """获取配置
+    
+    根据预设名称获取相应的配置字典，
+    支持自定义参数覆盖预设配置。
     
     参数:
         preset (str): 预设配置名称 ('quick', 'standard', 'cross_validation', 'high_performance', 'small_dataset')
@@ -149,6 +167,19 @@ def get_config(preset='standard', **kwargs):
     
     返回:
         dict: 配置字典
+    
+    异常:
+        ValueError: 当预设名称不存在时抛出
+    
+    使用示例:
+        # 获取标准配置
+        config = get_config('standard')
+        
+        # 获取交叉验证配置并自定义参数
+        cv_config = get_config('cross_validation', num_epochs=150, n_splits=10)
+        
+        # 获取快速训练配置
+        quick_config = get_config('quick', data_type='PCA')
     """
     if preset not in PRESET_CONFIGS:
         raise ValueError(f"未知的预设配置: {preset}. 可用选项: {list(PRESET_CONFIGS.keys())}")
@@ -158,8 +189,13 @@ def get_config(preset='standard', **kwargs):
     
     return config
 
+
 # 使用示例
 if __name__ == "__main__":
+    """配置文件使用示例
+    
+    演示如何获取和使用不同的配置预设。
+    """
     # 获取标准配置
     config = get_config('standard')
     print("标准配置:", config)

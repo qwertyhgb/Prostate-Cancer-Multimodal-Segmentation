@@ -2,43 +2,47 @@
 
 这是一个基于3D U-Net的前列腺多模态MRI图像分割项目，支持BPH和PCA数据的自动分割。
 
+## 项目概述
+
+本项目旨在解决前列腺多模态MRI图像的分割问题，通过深度学习技术实现前列腺区域的精确分割。
+项目支持BPH（良性前列腺增生）和PCA（前列腺癌）两种数据类型，以及5种不同的MRI模态。
+
+### 主要特性
+- **多模态支持**: 支持ADC、DWI、T2 fs、T2 not fs、gaoqing-T2等5种MRI模态
+- **数据类型支持**: 同时支持BPH和PCA两种前列腺疾病类型
+- **缺失模态处理**: 提供多种策略处理不完整的模态数据
+- **交叉验证**: 内置K折交叉验证功能，提高模型评估的可靠性
+- **早停机制**: 智能早停防止过拟合，优化训练效率
+- **模型保存**: 自动保存最佳模型和训练检查点
+
 ## 项目结构
 
 ```
 U-Net_3D/
-├── models/                  # 模型定义
+├── models/                  # 模型定义目录
 │   └── unet3d.py           # 3D U-Net模型实现
-├── script/                  # 数据处理和辅助脚本
-│   ├── data_loader.py      # 数据加载器
-│   ├── validate_model.py   # 模型验证脚本
-│   └── predict.py          # 模型预测脚本
-├── utils/                   # 工具模块
-│   ├── losses.py           # 损失函数
-│   └── trainer.py          # 基础训练器
-├── train_bph.py            # BPH数据训练脚本
+├── script/                  # 数据处理和辅助脚本目录
+│   ├── data_loader.py      # 数据加载器，支持多模态数据加载
+│   ├── validate_model.py   # 模型验证脚本，评估模型性能
+│   └── predict.py          # 模型预测脚本，用于新数据分割
+├── utils/                   # 工具模块目录
+│   ├── losses.py           # 损失函数定义（DiceLoss、BCEDiceLoss等）
+│   └── trainer.py          # 基础训练器，提供通用训练框架
+├── train_bph.py            # BPH数据训练脚本（基础版本）
 ├── train_bph_cv.py         # BPH数据交叉验证训练脚本
-├── train_bph_optimized.py  # 优化版训练脚本（推荐）
+├── train_bph_optimized.py  # 优化版训练脚本（推荐使用）
 ├── data/                   # 数据目录
-│   └── BPH-PCA/           # BPH和PCA数据
-│       ├── BPH/           # BPH数据
-│       │   ├── ADC/       # ADC模态图像
-│       │   ├── DWI/       # DWI模态图像
+│   └── BPH-PCA/           # BPH和PCA数据根目录
+│       ├── BPH/           # BPH数据目录
+│       │   ├── ADC/       # ADC模态图像（弥散加权成像的表观扩散系数）
+│       │   ├── DWI/       # DWI模态图像（弥散加权成像）
 │       │   ├── T2 fs/     # T2脂肪抑制模态图像
 │       │   ├── T2 not fs/ # T2非脂肪抑制模态图像
 │       │   └── gaoqing-T2/ # 高清T2模态图像
-│       ├── PCA/           # PCA数据
-│       └── ROI(BPH+PCA)/ # 分割标签
-└── checkpoints/            # 模型检查点
+│       ├── PCA/           # PCA数据目录
+│       └── ROI(BPH+PCA)/ # 分割标签目录
+└── checkpoints/            # 模型检查点保存目录
 ```
-
-## 功能特性
-
-- **多模态支持**：支持5种MRI模态（ADC、DWI、T2 fs、T2 not fs、gaoqing-T2）
-- **数据类型支持**：支持BPH和PCA两种数据类型
-- **缺失模态处理**：支持零填充、跳过等多种缺失模态处理策略
-- **交叉验证**：提供K折交叉验证功能
-- **早停机制**：防止过拟合
-- **模型保存**：自动保存最佳模型和检查点
 
 ## 快速开始
 

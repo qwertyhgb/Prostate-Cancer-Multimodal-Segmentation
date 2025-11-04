@@ -1,4 +1,5 @@
 import os
+import glob
 import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -6,409 +7,401 @@ import SimpleITK as sitk
 from sklearn.model_selection import KFold
 
 class ProstateDataset(Dataset):
-    """前列腺多模态MRI数据集
+    """前列腺多模态MRI数据集类
     
-    用于加载和预处理前列腺多模态MRI图像和对应的分割标签
-    专门针对BPH数据进行优化
+    专门用于加载和处理前列腺多模态MRI数据
+    支持5种模态：ADC、DWI、gaoqing-T2、T2 fs、T2 not fs
+    针对BPH和PCA数据进行了优化
+    
+    主要功能：
+    - 自动扫描和加载多模态数据
+    - 处理缺失模态情况
+    - 图像预处理和标准化
+    - 标签加载和二值化
+    - 支持交叉验证数据划分
+    
+    数据组织：
+    - 每个病例对应一个文件夹
+    - 每种模态对应一个NIFTI文件
+    - 标签文件为segmentation.nii.gz
     """
-    def __init__(self, root_dir, mode='train', transform=None, data_type='BPH', 
-                 fold_indices=None, handle_missing_modalities='zero_fill'):
-        """
-        初始化前列腺数据集
-        
-        参数:
-            root_dir (str): 数据集根目录
-            mode (str): 数据模式，'train' 或 'test'
-            transform: 数据增强转换函数
-            data_type (str): 数据类型，'BPH' 或 'PCA'，默认为'BPH'
-            fold_indices (list): 当前折的索引列表，用于交叉验证
-            handle_missing_modalities (str): 处理缺失模态的方法
-                - 'zero_fill': 使用零填充缺失模态
-                - 'skip': 跳过不完整的病例
-                - 'duplicate': 使用其他模态复制填充
-        """
-        self.root_dir = root_dir
-        self.mode = mode
-        self.transform = transform
-        self.data_type = data_type
-        self.handle_missing_modalities = handle_missing_modalities
-        
-        # 定义MRI模态列表
-        # 包括ADC、DWI、高清T2、T2脂肪抑制和T2非脂肪抑制五种模态
-        self.modalities = ['ADC', 'DWI', 'gaoqing-T2', 'T2 fs', 'T2 not fs']
-        
-        # 获取所有病例ID列表
-        all_cases = self._get_case_list()
-        
-        # 如果提供了折索引，则使用这些索引选择病例（用于交叉验证）
-        if fold_indices is not None:
-            self.cases = [all_cases[i] for i in fold_indices]
-        else:
-            self.cases = all_cases
-            
-        # 根据处理策略过滤病例
-        self.cases = self._filter_cases(self.cases)
-        
-        # 记录参考尺寸（用于统一图像尺寸）
-        self.reference_shape = None
-        
-    def _get_case_list(self):
-        """获取所有可用的病例ID
-        
-        通过扫描ADC模态目录来获取所有病例ID列表
-        选择ADC模态是因为所有病例都应包含此模态
-        
-        返回:
-            list: 排序后的病例ID列表
-        """
-        # 构建ADC模态数据目录路径
-        adc_dir = os.path.join(self.root_dir, 'BPH-PCA', self.data_type, 'ADC')
-        # 检查目录是否存在
-        if not os.path.exists(adc_dir):
-            raise FileNotFoundError(f"数据目录不存在: {adc_dir}")
-        
-        # 获取所有.nii文件的文件名（不含扩展名）
-        # 这些文件名即为病例ID
-        cases = [f.split('.')[0] for f in os.listdir(adc_dir) if f.endswith('.nii')]
-        # 对病例ID进行排序以确保一致性
-        return sorted(cases)
-        
-    def _filter_cases(self, cases):
-        """根据处理策略过滤病例
-        
-        参数:
-            cases (list): 原始病例列表
-            
-        返回:
-            list: 过滤后的病例列表
-        """
-        if self.handle_missing_modalities == 'skip':
-            # 跳过不完整的病例（包括模态和标签）
-            filtered_cases = []
-            for case_id in cases:
-                # 检查所有模态是否存在
-                modality_complete = True
-                for modality in self.modalities:
-                    filepath = os.path.join(self.root_dir, 'BPH-PCA', self.data_type, 
-                                          modality, f"{case_id}.nii")
-                    if not os.path.exists(filepath):
-                        modality_complete = False
-                        break
-                
-                # 检查标签是否存在
-                label_path = os.path.join(self.root_dir, 'BPH-PCA', f'ROI({self.data_type}+PCA)', 
-                                         self.data_type, f"{case_id}.nii")
-                label_exists = os.path.exists(label_path)
-                
-                if modality_complete and label_exists:
-                    filtered_cases.append(case_id)
-                    
-            print(f"完整病例数: {len(filtered_cases)} / {len(cases)}")
-            return filtered_cases
-        else:
-            # 其他策略过滤掉没有标签的病例
-            filtered_cases = []
-            for case_id in cases:
-                label_path = os.path.join(self.root_dir, 'BPH-PCA', f'ROI({self.data_type}+PCA)', 
-                                         self.data_type, f"{case_id}.nii")
-                if os.path.exists(label_path):
-                    filtered_cases.append(case_id)
-                    
-            print(f"有标签的病例数: {len(filtered_cases)} / {len(cases)}")
-            return filtered_cases
     
-    def _load_nifti_with_sitk(self, filepath):
-        """使用SimpleITK加载NIFTI格式的图像数据
+    def __init__(self, data_dir, modalities=None, missing_strategy='zero_fill', 
+                 target_size=(128, 128, 128), is_training=True):
+        """
+        初始化数据集
         
         参数:
-            filepath (str): NIFTI文件路径
+            data_dir (str): 数据根目录路径
+            modalities (list): 模态列表，默认包含5种标准模态
+            missing_strategy (str): 缺失模态处理策略
+                - 'zero_fill': 用零填充缺失模态
+                - 'skip': 跳过缺失模态的病例
+                - 'duplicate': 用其他模态复制填充
+            target_size (tuple): 目标图像尺寸 (D, H, W)
+            is_training (bool): 是否为训练模式
+        """
+        self.data_dir = data_dir
+        # 设置默认模态列表：ADC、DWI、高分辨率T2、T2脂肪抑制、T2非脂肪抑制
+        self.modalities = modalities or ['ADC', 'DWI', 'gaoqing-T2', 'T2 fs', 'T2 not fs']
+        self.missing_strategy = missing_strategy
+        self.target_size = target_size
+        self.is_training = is_training
+        
+        # 获取病例列表并过滤有效病例
+        self.case_list = self._get_case_list()
+        self.case_list = self._filter_cases()
+        
+        print(f"数据集初始化完成，共找到 {len(self.case_list)} 个有效病例")
+        print(f"模态列表: {self.modalities}")
+        print(f"缺失模态处理策略: {missing_strategy}")
+
+    def _get_case_list(self):
+        """
+        扫描数据目录，获取所有病例文件夹列表
+        
+        返回:
+            list: 病例文件夹名称列表
+            
+        扫描规则：
+        - 只扫描直接子目录
+        - 排除隐藏文件和系统文件
+        - 每个病例对应一个独立的文件夹
+        """
+        # 获取数据目录下的所有子目录
+        all_items = os.listdir(self.data_dir)
+        # 过滤出目录项，排除文件
+        case_dirs = [item for item in all_items 
+                    if os.path.isdir(os.path.join(self.data_dir, item))]
+        # 排除隐藏文件和系统文件
+        case_dirs = [case for case in case_dirs if not case.startswith('.')]
+        
+        print(f"扫描到 {len(case_dirs)} 个病例文件夹")
+        return case_dirs
+
+    def _filter_cases(self):
+        """
+        过滤病例，只保留包含必要模态数据的病例
+        
+        返回:
+            list: 过滤后的有效病例列表
+            
+        过滤标准：
+        - 必须包含标签文件 (segmentation.nii.gz)
+        - 根据缺失模态策略决定是否保留
+        - 检查模态文件的完整性和可读性
+        """
+        valid_cases = []
+        
+        for case in self.case_list:
+            case_path = os.path.join(self.data_dir, case)
+            
+            # 检查标签文件是否存在
+            label_path = os.path.join(case_path, 'segmentation.nii.gz')
+            if not os.path.exists(label_path):
+                print(f"警告: 病例 {case} 缺少标签文件，已跳过")
+                continue
+            
+            # 检查模态文件
+            modality_files = {}
+            missing_modalities = []
+            
+            for modality in self.modalities:
+                # 构建模态文件路径模式
+                pattern = os.path.join(case_path, f"*{modality}*.nii*")
+                files = glob.glob(pattern)
+                
+                if files:
+                    # 取第一个匹配的文件
+                    modality_files[modality] = files[0]
+                else:
+                    missing_modalities.append(modality)
+            
+            # 根据缺失模态策略处理
+            if missing_modalities:
+                if self.missing_strategy == 'skip':
+                    print(f"警告: 病例 {case} 缺失模态 {missing_modalities}，已跳过")
+                    continue
+                elif self.missing_strategy == 'duplicate':
+                    # 用第一个可用模态复制填充缺失模态
+                    available_modalities = [m for m in self.modalities if m not in missing_modalities]
+                    if available_modalities:
+                        duplicate_modality = available_modalities[0]
+                        for missing_mod in missing_modalities:
+                            modality_files[missing_mod] = modality_files[duplicate_modality]
+                        print(f"信息: 病例 {case} 缺失模态 {missing_modalities}，已用 {duplicate_modality} 复制填充")
+                    else:
+                        print(f"警告: 病例 {case} 所有模态都缺失，已跳过")
+                        continue
+                # 'zero_fill' 策略在加载时处理
+            
+            # 检查模态文件是否可读
+            try:
+                for modality, file_path in modality_files.items():
+                    # 尝试读取文件头信息验证文件完整性
+                    reader = sitk.ImageFileReader()
+                    reader.SetFileName(file_path)
+                    reader.ReadImageInformation()
+            except Exception as e:
+                print(f"警告: 病例 {case} 的模态文件读取失败: {e}，已跳过")
+                continue
+            
+            # 记录有效病例及其模态文件信息
+            valid_cases.append({
+                'case_id': case,
+                'case_path': case_path,
+                'modality_files': modality_files,
+                'label_path': label_path,
+                'missing_modalities': missing_modalities
+            })
+        
+        return valid_cases
+
+    def _load_nifti_with_sitk(self, file_path):
+        """
+        使用SimpleITK加载NIFTI格式图像
+        
+        参数:
+            file_path (str): NIFTI文件路径
             
         返回:
-            numpy.ndarray: 图像数据数组，形状为(D, H, W)
+            numpy.ndarray: 图像数据数组
             
-        异常:
-            FileNotFoundError: 当文件不存在时抛出
+        处理步骤：
+        - 读取NIFTI文件
+        - 转换为numpy数组
+        - 处理可能的维度问题
+        - 确保数据类型一致性
         """
-        # 检查文件是否存在
-        if not os.path.exists(filepath):
-            raise FileNotFoundError(f"文件不存在: {filepath}")
-        
         try:
             # 使用SimpleITK读取图像
-            # sitk.ReadImage可以读取多种医学图像格式，包括NIFTI
-            # 使用兼容的编码方式处理中文路径
-            sitk_image = sitk.ReadImage(filepath)
+            image = sitk.ReadImage(file_path)
+            # 转换为numpy数组
+            array = sitk.GetArrayFromImage(image)
             
-            # 将SimpleITK图像转换为numpy数组
-            # SimpleITK图像的维度顺序通常是(Z, Y, X)，对应我们的(D, H, W)
-            image_array = sitk.GetArrayFromImage(sitk_image)
+            # 处理单通道图像，确保维度一致性
+            if len(array.shape) == 3:
+                # 3D图像，添加通道维度
+                array = array[np.newaxis, ...]  # 形状: (1, D, H, W)
+            elif len(array.shape) == 4:
+                # 4D图像，可能是多通道或多时间点
+                # 取第一个通道/时间点
+                array = array[0:1, ...]
+            else:
+                raise ValueError(f"不支持的图像维度: {array.shape}")
             
-            return image_array
+            return array
+            
         except Exception as e:
-            print(f"加载文件时出错 {filepath}: {e}")
-            # 如果文件存在但无法读取，创建一个默认的零数组
-            return np.zeros((64, 64, 64), dtype=np.float32)
-    
-    def _resize_image(self, image, target_shape):
-        """调整图像尺寸以匹配目标形状
+            print(f"错误: 加载文件 {file_path} 失败: {e}")
+            # 根据缺失模态策略返回相应数据
+            if self.missing_strategy == 'zero_fill':
+                # 返回零填充的图像
+                return np.zeros((1,) + self.target_size, dtype=np.float32)
+            else:
+                raise
+
+    def _preprocess_image(self, image_array):
+        """
+        图像预处理
         
         参数:
-            image (numpy.ndarray): 输入图像
-            target_shape (tuple): 目标形状 (D, H, W)
+            image_array (numpy.ndarray): 原始图像数组
             
         返回:
-            numpy.ndarray: 调整尺寸后的图像
-        """
-        # 如果形状已经匹配，直接返回
-        if image.shape == target_shape:
-            return image
+            numpy.ndarray: 预处理后的图像数组
             
-        # 使用简单的插值方法调整尺寸
-        from scipy.ndimage import zoom
-        
-        # 计算缩放因子
-        zoom_factors = [t / s for t, s in zip(target_shape, image.shape)]
-        
-        # 调整图像尺寸
-        resized_image = zoom(image, zoom_factors, order=1)  # 线性插值
-        
-        return resized_image
-    
-    def _preprocess_image(self, image):
-        """预处理图像数据
-        
-        对图像进行归一化处理，将像素值缩放到[0,1]范围
-        
-        参数:
-            image (numpy.ndarray): 原始图像数据
-            
-        返回:
-            numpy.ndarray: 预处理后的图像数据
+        预处理步骤：
+        - 尺寸调整到目标大小
+        - 强度归一化到[0,1]范围
+        - 数据类型转换
+        - 异常值处理
         """
-        # 转换为浮点型以支持小数运算
-        image = image.astype(np.float32)
+        # 确保数据类型为float32
+        image_array = image_array.astype(np.float32)
         
-        # 标准化到[0,1]范围
-        # 防止除零错误
-        if image.max() - image.min() != 0:
-            # 将像素值缩放到[0,1]范围
-            image = (image - image.min()) / (image.max() - image.min())
-        else:
-            # 如果所有像素值相同，则设置为0
-            image = np.zeros_like(image, dtype=np.float32)
+        # 尺寸调整
+        if image_array.shape[1:] != self.target_size:
+            # 使用SimpleITK进行重采样
+            original_image = sitk.GetImageFromArray(image_array[0])
+            
+            # 计算重采样参数
+            original_size = original_image.GetSize()
+            target_size = self.target_size
+            
+            # 创建重采样器
+            resampler = sitk.ResampleImageFilter()
+            resampler.SetSize(target_size)
+            resampler.SetOutputSpacing([
+                original_size[0] * original_image.GetSpacing()[0] / target_size[0],
+                original_size[1] * original_image.GetSpacing()[1] / target_size[1],
+                original_size[2] * original_image.GetSpacing()[2] / target_size[2]
+            ])
+            resampler.SetOutputOrigin(original_image.GetOrigin())
+            resampler.SetOutputDirection(original_image.GetDirection())
+            resampler.SetInterpolator(sitk.sitkLinear)
+            
+            # 执行重采样
+            resampled_image = resampler.Execute(original_image)
+            image_array = sitk.GetArrayFromImage(resampled_image)
+            image_array = image_array[np.newaxis, ...]  # 重新添加通道维度
         
-        return image
-    
+        # 强度归一化
+        # 排除零值区域进行归一化
+        nonzero_mask = image_array != 0
+        if np.any(nonzero_mask):
+            nonzero_values = image_array[nonzero_mask]
+            # 使用非零值的百分位数进行归一化，避免异常值影响
+            p1, p99 = np.percentile(nonzero_values, [1, 99])
+            image_array = np.clip(image_array, p1, p99)
+            image_array = (image_array - p1) / (p99 - p1 + 1e-8)
+        
+        return image_array
+
     def __len__(self):
         """
-        获取数据集大小
+        返回数据集中的病例数量
         
         返回:
-            int: 数据集中样本的数量
+            int: 病例数量
         """
-        return len(self.cases)
-    
+        return len(self.case_list)
+
     def __getitem__(self, idx):
-        """获取一个数据样本
+        """
+        获取指定索引的数据样本
         
         参数:
             idx (int): 样本索引
             
         返回:
-            dict: 包含多模态图像、标签和病例ID的字典
-                - 'image': 多模态图像张量，形状为(5, D, H, W)
-                - 'label': 分割标签张量，形状为(D, H, W)
-                - 'case_id': 病例ID
+            dict: 包含图像数据和标签的字典
+                - 'image': 多模态图像张量，形状为(n_modalities, D, H, W)
+                - 'label': 分割标签张量，形状为(1, D, H, W)
+                - 'case_id': 病例标识符
         """
-        # 根据索引获取病例ID
-        case_id = self.cases[idx]
+        case_info = self.case_list[idx]
+        case_id = case_info['case_id']
         
-        # 加载多模态图像
+        # 加载多模态图像数据
         modality_images = []
-        reference_image = None  # 用于缺失模态的参考图像
         
-        for i, modality in enumerate(self.modalities):
-            # 构建图像文件路径
-            filepath = os.path.join(self.root_dir, 'BPH-PCA', self.data_type, 
-                                  modality, f"{case_id}.nii")
-            
-            # 检查文件是否存在
-            if os.path.exists(filepath):
-                # 使用SimpleITK加载图像
-                try:
-                    img = self._load_nifti_with_sitk(filepath)
-                    # 保存第一个存在的模态作为参考图像
-                    if reference_image is None:
-                        reference_image = img
-                except Exception as e:
-                    print(f"加载模态 {modality} 时出错: {e}")
-                    # 如果加载失败，使用零填充
-                    if reference_image is not None:
-                        img = np.zeros_like(reference_image, dtype=np.float32)
-                    else:
-                        img = np.zeros((64, 64, 64), dtype=np.float32)
+        for modality in self.modalities:
+            if modality in case_info['modality_files']:
+                # 加载存在的模态
+                file_path = case_info['modality_files'][modality]
+                image_array = self._load_nifti_with_sitk(file_path)
             else:
-                # 处理缺失的模态
-                if self.handle_missing_modalities == 'zero_fill':
-                    # 使用零填充
-                    if reference_image is not None:
-                        img = np.zeros_like(reference_image, dtype=np.float32)
+                # 处理缺失模态
+                if self.missing_strategy == 'zero_fill':
+                    # 零填充
+                    image_array = np.zeros((1,) + self.target_size, dtype=np.float32)
+                elif self.missing_strategy == 'duplicate':
+                    # 复制其他模态（在过滤阶段已处理）
+                    available_modalities = [m for m in self.modalities 
+                                           if m in case_info['modality_files']]
+                    if available_modalities:
+                        duplicate_file = case_info['modality_files'][available_modalities[0]]
+                        image_array = self._load_nifti_with_sitk(duplicate_file)
                     else:
-                        # 如果还没有参考图像，则创建一个默认大小的零图像
-                        img = np.zeros((64, 64, 64), dtype=np.float32)
-                elif self.handle_missing_modalities == 'duplicate':
-                    # 使用参考图像填充（如果有的话）
-                    if reference_image is not None:
-                        img = reference_image.copy()
-                    else:
-                        # 如果还没有参考图像，则创建一个默认大小的零图像
-                        img = np.zeros((64, 64, 64), dtype=np.float32)
+                        image_array = np.zeros((1,) + self.target_size, dtype=np.float32)
                 else:
-                    # 其他情况抛出异常
-                    raise FileNotFoundError(f"缺失模态文件且未指定处理策略: {filepath}")
+                    raise ValueError(f"不支持的缺失模态策略: {self.missing_strategy}")
             
-            # 对图像进行预处理
-            img = self._preprocess_image(img)
-            # 添加到模态图像列表
-            modality_images.append(img)
+            # 预处理图像
+            image_array = self._preprocess_image(image_array)
+            modality_images.append(image_array)
         
-        # 设置参考形状（用于统一所有病例的图像尺寸）
-        if self.reference_shape is None:
-            self.reference_shape = reference_image.shape if reference_image is not None else (64, 64, 64)
+        # 合并多模态数据
+        # 形状: (n_modalities, D, H, W)
+        multimodal_image = np.concatenate(modality_images, axis=0)
         
-        # 调整所有模态图像到统一尺寸
-        resized_images = []
-        for img in modality_images:
-            if img.shape != self.reference_shape:
-                img = self._resize_image(img, self.reference_shape)
-            resized_images.append(img)
-        
-        # 将多个模态的图像堆叠在一起
-        # axis=0表示在通道维度上堆叠，形成(5, D, H, W)的数组
-        image = np.stack(resized_images, axis=0)
-        
-        # 加载分割标签
-        # 标签文件存储在特定目录中
-        label_path = os.path.join(self.root_dir, 'BPH-PCA', f'ROI({self.data_type}+PCA)', 
-                                 self.data_type, f"{case_id}.nii")
-        
-        try:
-            # 加载标签图像
-            label = self._load_nifti_with_sitk(label_path)
-            # 调整标签图像到统一尺寸
-            if label.shape != self.reference_shape:
-                label = self._resize_image(label, self.reference_shape)
-            # 转换为二值标签（前景为1，背景为0）
-            label = (label > 0).astype(np.float32)
-        except Exception as e:
-            print(f"加载标签时出错 {label_path}: {e}")
-            # 如果标签加载失败，创建一个全零标签
-            label = np.zeros(self.reference_shape, dtype=np.float32)
+        # 加载标签数据
+        label_array = self._load_nifti_with_sitk(case_info['label_path'])
+        # 标签预处理：二值化
+        label_array = (label_array > 0).astype(np.float32)
         
         # 转换为PyTorch张量
-        image = torch.from_numpy(image)
-        label = torch.from_numpy(label)
+        image_tensor = torch.from_numpy(multimodal_image).float()
+        label_tensor = torch.from_numpy(label_array).float()
         
-        # 应用数据增强（如果指定了转换函数）
-        if self.transform:
-            image, label = self.transform(image, label)
-            
-        # 返回包含图像、标签和病例ID的字典
         return {
-            'image': image,
-            'label': label,
+            'image': image_tensor,
+            'label': label_tensor,
             'case_id': case_id
         }
 
-def get_dataloader(root_dir, batch_size=1, num_workers=0, mode='train', data_type='BPH',
-                   fold_indices=None, handle_missing_modalities='zero_fill'):
-    """创建数据加载器
+def get_dataloader(data_dir, batch_size=2, shuffle=True, modalities=None, 
+                   missing_strategy='zero_fill', target_size=(128, 128, 128), 
+                   num_workers=4, is_training=True):
+    """
+    创建数据加载器
     
     参数:
-        root_dir (str): 数据集根目录
-        batch_size (int): 批次大小，默认为1
-        num_workers (int): 数据加载的线程数，默认为0（避免Windows上的问题）
-        mode (str): 数据模式，'train' 或 'test'
-        data_type (str): 数据类型，'BPH' 或 'PCA'
-        fold_indices (list): 当前折的索引列表，用于交叉验证
-        handle_missing_modalities (str): 处理缺失模态的方法
-            - 'zero_fill': 使用零填充缺失模态
-            - 'skip': 跳过不完整的病例
-            - 'duplicate': 使用其他模态复制填充
+        data_dir (str): 数据目录路径
+        batch_size (int): 批次大小
+        shuffle (bool): 是否打乱数据
+        modalities (list): 模态列表
+        missing_strategy (str): 缺失模态处理策略
+        target_size (tuple): 目标图像尺寸
+        num_workers (int): 数据加载工作进程数
+        is_training (bool): 是否为训练模式
         
     返回:
-        DataLoader: PyTorch数据加载器对象
+        DataLoader: PyTorch数据加载器
     """
-    # 创建前列腺数据集实例
-    dataset = ProstateDataset(root_dir=root_dir, mode=mode, data_type=data_type,
-                              fold_indices=fold_indices,
-                              handle_missing_modalities=handle_missing_modalities)
+    # 创建数据集实例
+    dataset = ProstateDataset(
+        data_dir=data_dir,
+        modalities=modalities,
+        missing_strategy=missing_strategy,
+        target_size=target_size,
+        is_training=is_training
+    )
     
     # 创建数据加载器
     dataloader = DataLoader(
         dataset,
         batch_size=batch_size,
-        # 训练模式下打乱数据顺序，测试模式下保持顺序
-        shuffle=(mode == 'train'),
+        shuffle=shuffle,
         num_workers=num_workers,
-        # 将数据加载到GPU内存中以加速训练
-        pin_memory=False  # 关闭pin_memory避免Windows上的问题
+        pin_memory=True  # 加速GPU数据传输
     )
     
     return dataloader
 
-def get_kfold_splits(root_dir, data_type='BPH', n_splits=5, shuffle=True, random_state=42,
-                     handle_missing_modalities='zero_fill'):
-    """获取K折交叉验证的分割索引
+def get_kfold_splits(data_dir, n_splits=5, modalities=None, 
+                    missing_strategy='zero_fill', target_size=(128, 128, 128)):
+    """
+    生成K折交叉验证的数据划分
     
     参数:
-        root_dir (str): 数据集根目录
-        data_type (str): 数据类型，'BPH' 或 'PCA'
-        n_splits (int): 折数，默认为5
-        shuffle (bool): 是否打乱数据，默认为True
-        random_state (int): 随机种子，确保结果可重现，默认为42
-        handle_missing_modalities (str): 处理缺失模态的方法
+        data_dir (str): 数据目录路径
+        n_splits (int): 交叉验证折数
+        modalities (list): 模态列表
+        missing_strategy (str): 缺失模态处理策略
+        target_size (tuple): 目标图像尺寸
         
     返回:
-        list: 每个元素是一个元组(train_indices, val_indices)，包含训练和验证索引
-        
-    异常:
-        FileNotFoundError: 当数据目录不存在时抛出
+        list: 包含K个(train_indices, val_indices)元组的列表
     """
-    # 获取所有病例ID
-    adc_dir = os.path.join(root_dir, 'BPH-PCA', data_type, 'ADC')
-    if not os.path.exists(adc_dir):
-        raise FileNotFoundError(f"数据目录不存在: {adc_dir}")
+    # 创建数据集实例以获取病例列表
+    dataset = ProstateDataset(
+        data_dir=data_dir,
+        modalities=modalities,
+        missing_strategy=missing_strategy,
+        target_size=target_size
+    )
     
-    # 获取所有.nii文件的文件名（不含扩展名）
-    all_cases = [f.split('.')[0] for f in os.listdir(adc_dir) if f.endswith('.nii')]
-    n_samples = len(all_cases)
+    # 获取病例数量
+    n_cases = len(dataset)
     
-    # 如果需要跳过不完整的病例，先过滤
-    if handle_missing_modalities == 'skip':
-        filtered_cases = []
-        modalities = ['ADC', 'DWI', 'gaoqing-T2', 'T2 fs', 'T2 not fs']
-        for case_id in all_cases:
-            complete = True
-            for modality in modalities:
-                filepath = os.path.join(root_dir, 'BPH-PCA', data_type, 
-                                      modality, f"{case_id}.nii")
-                if not os.path.exists(filepath):
-                    complete = False
-                    break
-            if complete:
-                filtered_cases.append(case_id)
-        all_cases = filtered_cases
-        n_samples = len(all_cases)
-        print(f"交叉验证将使用 {n_samples} 个完整病例")
+    # 使用KFold进行数据划分
+    kfold = KFold(n_splits=n_splits, shuffle=True, random_state=42)
     
-    # 创建K折交叉验证分割器
-    kf = KFold(n_splits=n_splits, shuffle=shuffle, random_state=random_state)
-    
-    # 生成分割索引
     splits = []
-    for train_indices, val_indices in kf.split(range(n_samples)):
-        # 将numpy数组转换为列表
-        splits.append((train_indices.tolist(), val_indices.tolist()))
+    for train_indices, val_indices in kfold.split(range(n_cases)):
+        splits.append((train_indices, val_indices))
     
+    print(f"生成 {n_splits} 折交叉验证划分，共 {n_cases} 个病例")
     return splits
