@@ -264,7 +264,6 @@ class CrossValidationTrainer:
                     
                     # 确保输出和标签的形状匹配
                     if outputs.shape != labels.shape:
-                        print(f"警告: 输出和标签形状不匹配. 输出: {outputs.shape}, 标签: {labels.shape}")
                         # 调整标签形状以匹配输出
                         if len(labels.shape) != len(outputs.shape):
                             # 如果标签缺少通道维度，则添加
@@ -276,11 +275,13 @@ class CrossValidationTrainer:
                             # 如果维度数量相同但尺寸不同，尝试调整标签以匹配输出
                             # 这里我们假设输出的尺寸是模型期望的尺寸
                             # 我们需要将标签调整为与输出相同的尺寸
-                            # 使用插值方法调整标签尺寸
+                            # 使用最近邻插值方法调整标签尺寸，确保结果仍然是二值的
                             if labels.shape[2:] != outputs.shape[2:]:
                                 # 只调整空间维度
-                                labels = F.interpolate(labels, size=outputs.shape[2:], mode='nearest')
-                        print(f"调整后 - 输出: {outputs.shape}, 标签: {labels.shape}")
+                                # 保存原始标签的数据类型
+                                original_dtype = labels.dtype
+                                # 转换为浮点型进行插值，然后转换回原始类型
+                                labels = F.interpolate(labels.float(), size=outputs.shape[2:], mode='nearest').to(original_dtype)
                     
                     loss = criterion(outputs, labels)
                     
@@ -307,7 +308,6 @@ class CrossValidationTrainer:
                         
                         # 确保输出和标签的形状匹配
                         if outputs.shape != labels.shape:
-                            print(f"警告: 输出和标签形状不匹配. 输出: {outputs.shape}, 标签: {labels.shape}")
                             # 调整标签形状以匹配输出
                             if len(labels.shape) != len(outputs.shape):
                                 # 如果标签缺少通道维度，则添加
@@ -319,11 +319,13 @@ class CrossValidationTrainer:
                                 # 如果维度数量相同但尺寸不同，尝试调整标签以匹配输出
                                 # 这里我们假设输出的尺寸是模型期望的尺寸
                                 # 我们需要将标签调整为与输出相同的尺寸
-                                # 使用插值方法调整标签尺寸
+                                # 使用最近邻插值方法调整标签尺寸，确保结果仍然是二值的
                                 if labels.shape[2:] != outputs.shape[2:]:
                                     # 只调整空间维度
-                                    labels = F.interpolate(labels, size=outputs.shape[2:], mode='nearest')
-                            print(f"调整后 - 输出: {outputs.shape}, 标签: {labels.shape}")
+                                    # 保存原始标签的数据类型
+                                    original_dtype = labels.dtype
+                                    # 转换为浮点型进行插值，然后转换回原始类型
+                                    labels = F.interpolate(labels.float(), size=outputs.shape[2:], mode='nearest').to(original_dtype)
                         
                         loss = criterion(outputs, labels)
                         val_loss += loss.item()
