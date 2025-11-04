@@ -27,7 +27,7 @@ class ProstateDataset(Dataset):
     """
     
     def __init__(self, data_dir, modalities=None, missing_strategy='zero_fill', 
-                 target_size=(128, 128, 128), is_training=True):
+                 target_size=(128, 128, 128), is_training=True, data_type='BPH'):
         """
         初始化数据集
         
@@ -40,6 +40,7 @@ class ProstateDataset(Dataset):
                 - 'duplicate': 用其他模态复制填充
             target_size (tuple): 目标图像尺寸 (D, H, W)
             is_training (bool): 是否为训练模式
+            data_type (str): 数据类型 ('BPH' 或 'PCA')
         """
         self.data_dir = data_dir
         # 设置默认模态列表：ADC、DWI、高分辨率T2、T2脂肪抑制、T2非脂肪抑制
@@ -47,12 +48,14 @@ class ProstateDataset(Dataset):
         self.missing_strategy = missing_strategy
         self.target_size = target_size
         self.is_training = is_training
+        self.data_type = data_type
         
         # 获取病例列表并过滤有效病例
         self.case_list = self._get_case_list()
         self.case_list = self._filter_cases()
         
         print(f"数据集初始化完成，共找到 {len(self.case_list)} 个有效病例")
+        print(f"数据类型: {data_type}")
         print(f"模态列表: {self.modalities}")
         print(f"缺失模态处理策略: {missing_strategy}")
 
@@ -67,6 +70,7 @@ class ProstateDataset(Dataset):
         - 只扫描直接子目录
         - 排除隐藏文件和系统文件
         - 每个病例对应一个独立的文件夹
+        - 根据data_type参数过滤病例
         """
         # 获取数据目录下的所有子目录
         all_items = os.listdir(self.data_dir)
@@ -76,8 +80,19 @@ class ProstateDataset(Dataset):
         # 排除隐藏文件和系统文件
         case_dirs = [case for case in case_dirs if not case.startswith('.')]
         
-        print(f"扫描到 {len(case_dirs)} 个病例文件夹")
-        return case_dirs
+        # 根据data_type参数过滤病例
+        if self.data_type == 'BPH':
+            # 对于BPH数据，我们假设病例文件夹名包含'BPH'或不包含'PCA'
+            filtered_cases = [case for case in case_dirs if 'BPH' in case.upper() or 'PCA' not in case.upper()]
+        elif self.data_type == 'PCA':
+            # 对于PCA数据，我们假设病例文件夹名包含'PCA'
+            filtered_cases = [case for case in case_dirs if 'PCA' in case.upper()]
+        else:
+            # 默认情况下，返回所有病例
+            filtered_cases = case_dirs
+        
+        print(f"扫描到 {len(case_dirs)} 个病例文件夹，根据数据类型 '{self.data_type}' 过滤后剩余 {len(filtered_cases)} 个")
+        return filtered_cases
 
     def _filter_cases(self):
         """
@@ -358,7 +373,8 @@ def get_dataloader(data_dir, batch_size=2, shuffle=True, modalities=None,
         modalities=modalities,
         missing_strategy=missing_strategy,
         target_size=target_size,
-        is_training=is_training
+        is_training=is_training,
+        data_type=data_type
     )
     
     # 如果指定了索引，则使用Subset创建子数据集
@@ -398,7 +414,8 @@ def get_kfold_splits(data_dir, n_splits=5, modalities=None,
         data_dir=data_dir,
         modalities=modalities,
         missing_strategy=missing_strategy,
-        target_size=target_size
+        target_size=target_size,
+        data_type=data_type
     )
     
     # 获取病例数量
