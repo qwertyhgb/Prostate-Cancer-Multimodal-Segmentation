@@ -20,6 +20,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from torch.cuda.amp import autocast, GradScaler
 from tqdm import tqdm
 from models.unet3d import UNet3D
 from utils.losses import DiceLoss
@@ -243,6 +244,9 @@ class CrossValidationTrainer:
             num_workers=0  # 显式设置为0以避免在某些系统上出现警告
         )
         
+        # 初始化混合精度训练的梯度缩放器
+        scaler = GradScaler()
+        
         # 训练循环
         best_val_loss = float('inf')  # 初始化最佳验证损失
         patience_counter = 0  # 早停计数器
@@ -258,52 +262,11 @@ class CrossValidationTrainer:
                     images = batch['image'].to(self.device)
                     labels = batch['label'].to(self.device)
                     
-                    # 前向传播
+                    # 前向传播和反向传播（使用混合精度）
                     optimizer.zero_grad()
-                    outputs = model(images)
                     
-                    # 确保输出和标签的形状匹配
-                    if outputs.shape != labels.shape:
-                        # 调整标签形状以匹配输出
-                        if len(labels.shape) != len(outputs.shape):
-                            # 如果标签缺少通道维度，则添加
-                            if len(labels.shape) == 4 and len(outputs.shape) == 5:
-                                labels = labels.unsqueeze(1)  # 添加通道维度
-                            elif len(labels.shape) == 5 and len(outputs.shape) == 4:
-                                outputs = outputs.unsqueeze(1)  # 添加通道维度
-                        else:
-                            # 如果维度数量相同但尺寸不同，尝试调整标签以匹配输出
-                            # 这里我们假设输出的尺寸是模型期望的尺寸
-                            # 我们需要将标签调整为与输出相同的尺寸
-                            # 使用最近邻插值方法调整标签尺寸，确保结果仍然是二值的
-                            if labels.shape[2:] != outputs.shape[2:]:
-                                # 只调整空间维度
-                                # 保存原始标签的数据类型
-                                original_dtype = labels.dtype
-                                # 转换为浮点型进行插值，然后转换回原始类型
-                                labels = F.interpolate(labels.float(), size=outputs.shape[2:], mode='nearest').to(original_dtype)
-                    
-                    loss = criterion(outputs, labels)
-                    
-                    # 反向传播
-                    loss.backward()
-                    optimizer.step()
-                    
-                    train_loss += loss.item()
-                    pbar.set_postfix({'loss': f'{loss.item():.4f}'})
-                    
-            avg_train_loss = train_loss / len(train_loader)
-            
-            # 验证阶段
-            model.eval()
-            val_loss = 0
-            
-            with torch.no_grad():
-                with tqdm(val_loader, desc=f'Fold {fold_idx+1} Validation') as pbar:
-                    for batch in pbar:
-                        images = batch['image'].to(self.device)
-                        labels = batch['label'].to(self.device)
-                        
+                    # 使用自动混合精度
+                    with autocast():
                         outputs = model(images)
                         
                         # 确保输出和标签的形状匹配
@@ -328,6 +291,53 @@ class CrossValidationTrainer:
                                     labels = F.interpolate(labels.float(), size=outputs.shape[2:], mode='nearest').to(original_dtype)
                         
                         loss = criterion(outputs, labels)
+                    
+                    # 缩放损失并反向传播
+                    scaler.scale(loss).backward()
+                    scaler.step(optimizer)
+                    scaler.update()
+                    
+                    train_loss += loss.item()
+                    pbar.set_postfix({'loss': f'{loss.item():.4f}'})
+                    
+            avg_train_loss = train_loss / len(train_loader)
+            
+            # 验证阶段
+            model.eval()
+            val_loss = 0
+            
+            with torch.no_grad():
+                with tqdm(val_loader, desc=f'Fold {fold_idx+1} Validation') as pbar:
+                    for batch in pbar:
+                        images = batch['image'].to(self.device)
+                        labels = batch['label'].to(self.device)
+                        
+                        # 使用自动混合精度进行推理
+                        with autocast():
+                            outputs = model(images)
+                            
+                            # 确保输出和标签的形状匹配
+                            if outputs.shape != labels.shape:
+                                # 调整标签形状以匹配输出
+                                if len(labels.shape) != len(outputs.shape):
+                                    # 如果标签缺少通道维度，则添加
+                                    if len(labels.shape) == 4 and len(outputs.shape) == 5:
+                                        labels = labels.unsqueeze(1)  # 添加通道维度
+                                    elif len(labels.shape) == 5 and len(outputs.shape) == 4:
+                                        outputs = outputs.unsqueeze(1)  # 添加通道维度
+                                else:
+                                    # 如果维度数量相同但尺寸不同，尝试调整标签以匹配输出
+                                    # 这里我们假设输出的尺寸是模型期望的尺寸
+                                    # 我们需要将标签调整为与输出相同的尺寸
+                                    # 使用最近邻插值方法调整标签尺寸，确保结果仍然是二值的
+                                    if labels.shape[2:] != outputs.shape[2:]:
+                                        # 只调整空间维度
+                                        # 保存原始标签的数据类型
+                                        original_dtype = labels.dtype
+                                        # 转换为浮点型进行插值，然后转换回原始类型
+                                        labels = F.interpolate(labels.float(), size=outputs.shape[2:], mode='nearest').to(original_dtype)
+                            
+                            loss = criterion(outputs, labels)
                         val_loss += loss.item()
                         
                         pbar.set_postfix({'val_loss': f'{loss.item():.4f}'})
@@ -486,7 +496,7 @@ def main():
     config = {
         'data_dir': 'data',
         'num_epochs': 10,
-        'batch_size': 8,
+        'batch_size': 4,  # 减少批次大小以解决内存不足问题
         'learning_rate': 1e-4,
         'device': 'cuda' if torch.cuda.is_available() else 'cpu',
         'data_type': 'BPH',  # 指定使用BPH数据进行训练
