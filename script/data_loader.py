@@ -431,17 +431,10 @@ def get_kfold_splits(data_dir, n_splits=5, modalities=None,
     返回:
         list: 包含K个(train_indices, val_indices)元组的列表
     """
-    # 创建数据集实例以获取病例列表
-    dataset = ProstateDataset(
-        data_dir=data_dir,
-        modalities=modalities,
-        missing_strategy=missing_strategy,
-        target_size=target_size,
-        data_type=data_type
-    )
-    
-    # 获取病例数量
-    n_cases = len(dataset)
+    # 直接获取病例数量，避免创建完整的数据集实例
+    # 通过扫描数据目录来获取病例数量
+    case_ids = _get_case_list(data_dir, data_type)
+    n_cases = len(case_ids)
     
     # 使用KFold进行数据划分
     kfold = KFold(n_splits=n_splits, shuffle=True, random_state=42)
