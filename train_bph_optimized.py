@@ -18,6 +18,7 @@
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from tqdm import tqdm
 from models.unet3d import UNet3D
@@ -271,6 +272,14 @@ class CrossValidationTrainer:
                                 labels = labels.unsqueeze(1)  # 添加通道维度
                             elif len(labels.shape) == 5 and len(outputs.shape) == 4:
                                 outputs = outputs.unsqueeze(1)  # 添加通道维度
+                        else:
+                            # 如果维度数量相同但尺寸不同，尝试调整标签以匹配输出
+                            # 这里我们假设输出的尺寸是模型期望的尺寸
+                            # 我们需要将标签调整为与输出相同的尺寸
+                            # 使用插值方法调整标签尺寸
+                            if labels.shape[2:] != outputs.shape[2:]:
+                                # 只调整空间维度
+                                labels = F.interpolate(labels, size=outputs.shape[2:], mode='nearest')
                         print(f"调整后 - 输出: {outputs.shape}, 标签: {labels.shape}")
                     
                     loss = criterion(outputs, labels)
@@ -306,6 +315,14 @@ class CrossValidationTrainer:
                                     labels = labels.unsqueeze(1)  # 添加通道维度
                                 elif len(labels.shape) == 5 and len(outputs.shape) == 4:
                                     outputs = outputs.unsqueeze(1)  # 添加通道维度
+                            else:
+                                # 如果维度数量相同但尺寸不同，尝试调整标签以匹配输出
+                                # 这里我们假设输出的尺寸是模型期望的尺寸
+                                # 我们需要将标签调整为与输出相同的尺寸
+                                # 使用插值方法调整标签尺寸
+                                if labels.shape[2:] != outputs.shape[2:]:
+                                    # 只调整空间维度
+                                    labels = F.interpolate(labels, size=outputs.shape[2:], mode='nearest')
                             print(f"调整后 - 输出: {outputs.shape}, 标签: {labels.shape}")
                         
                         loss = criterion(outputs, labels)
