@@ -53,11 +53,6 @@ class ProstateDataset(Dataset):
         # 获取病例列表并过滤有效病例
         self.case_list = self._get_case_list()
         self.case_list = self._filter_cases()
-        
-        print(f"数据集初始化完成，共找到 {len(self.case_list)} 个有效病例")
-        print(f"数据类型: {data_type}")
-        print(f"模态列表: {self.modalities}")
-        print(f"缺失模态处理策略: {missing_strategy}")
 
     def _get_case_list(self):
         """
@@ -93,6 +88,9 @@ class ProstateDataset(Dataset):
             case_ids.append(case_id)
         
         print(f"扫描到 {len(case_ids)} 个病例文件")
+        print(f"数据类型: {self.data_type}")
+        print(f"模态列表: {self.modalities}")
+        print(f"缺失模态处理策略: {self.missing_strategy}")
         return case_ids
 
     def _filter_cases(self):
@@ -192,6 +190,7 @@ class ProstateDataset(Dataset):
                 'missing_modalities': missing_modalities
             })
         
+        print(f"数据集初始化完成，共找到 {len(valid_cases)} 个有效病例")
         return valid_cases
 
     def _load_nifti_with_sitk(self, file_path):
@@ -249,10 +248,8 @@ class ProstateDataset(Dataset):
             numpy.ndarray: 预处理后的图像数组
             
         预处理步骤：
-        - 尺寸调整到目标大小
-        - 强度归一化到[0,1]范围
         - 数据类型转换
-        - 异常值处理
+        - 尺寸调整到目标大小
         """
         # 确保数据类型为float32
         image_array = image_array.astype(np.float32)
@@ -282,16 +279,6 @@ class ProstateDataset(Dataset):
             resampled_image = resampler.Execute(original_image)
             image_array = sitk.GetArrayFromImage(resampled_image)
             image_array = image_array[np.newaxis, ...]  # 重新添加通道维度
-        
-        # 强度归一化
-        # 排除零值区域进行归一化
-        nonzero_mask = image_array != 0
-        if np.any(nonzero_mask):
-            nonzero_values = image_array[nonzero_mask]
-            # 使用非零值的百分位数进行归一化，避免异常值影响
-            p1, p99 = np.percentile(nonzero_values, [1, 99])
-            image_array = np.clip(image_array, p1, p99)
-            image_array = (image_array - p1) / (p99 - p1 + 1e-8)
         
         return image_array
 
@@ -349,12 +336,75 @@ class ProstateDataset(Dataset):
             image_array = self._preprocess_image(image_array)
             modality_images.append(image_array)
         
+        # 检查所有模态图像是否具有相同的尺寸
+        modality_shapes = [img.shape for img in modality_images]
+        if len(set(modality_shapes)) > 1:
+            # 如果模态图像尺寸不一致，调整到第一个模态的尺寸
+            target_shape = modality_images[0].shape
+            adjusted_images = []
+            for img in modality_images:
+                if img.shape != target_shape:
+                    # 使用SimpleITK进行重采样
+                    original_image = sitk.GetImageFromArray(img[0])
+                    
+                    # 计算重采样参数
+                    original_size = original_image.GetSize()
+                    target_size_sitk = (target_shape[2], target_shape[1], target_shape[0])  # SITK uses (W, H, D)
+                    
+                    # 创建重采样器
+                    resampler = sitk.ResampleImageFilter()
+                    resampler.SetSize(target_size_sitk)
+                    resampler.SetOutputSpacing([
+                        original_size[0] * original_image.GetSpacing()[0] / target_size_sitk[0],
+                        original_size[1] * original_image.GetSpacing()[1] / target_size_sitk[1],
+                        original_size[2] * original_image.GetSpacing()[2] / target_size_sitk[2]
+                    ])
+                    resampler.SetOutputOrigin(original_image.GetOrigin())
+                    resampler.SetOutputDirection(original_image.GetDirection())
+                    resampler.SetInterpolator(sitk.sitkLinear)
+                    
+                    # 执行重采样
+                    resampled_image = resampler.Execute(original_image)
+                    adjusted_img = sitk.GetArrayFromImage(resampled_image)
+                    adjusted_img = adjusted_img[np.newaxis, ...]  # 重新添加通道维度
+                    adjusted_images.append(adjusted_img)
+                else:
+                    adjusted_images.append(img)
+            modality_images = adjusted_images
+        
         # 合并多模态数据
         # 形状: (n_modalities, D, H, W)
         multimodal_image = np.concatenate(modality_images, axis=0)
         
         # 加载标签数据
         label_array = self._load_nifti_with_sitk(case_info['label_path'])
+        
+        # 确保标签与图像具有相同的尺寸
+        if label_array.shape[1:] != self.target_size:
+            # 使用SimpleITK进行重采样
+            original_label = sitk.GetImageFromArray(label_array[0])
+            
+            # 计算重采样参数
+            original_size = original_label.GetSize()
+            target_size = self.target_size
+            
+            # 创建重采样器
+            resampler = sitk.ResampleImageFilter()
+            resampler.SetSize(target_size)
+            resampler.SetOutputSpacing([
+                original_size[0] * original_label.GetSpacing()[0] / target_size[0],
+                original_size[1] * original_label.GetSpacing()[1] / target_size[1],
+                original_size[2] * original_label.GetSpacing()[2] / target_size[2]
+            ])
+            resampler.SetOutputOrigin(original_label.GetOrigin())
+            resampler.SetOutputDirection(original_label.GetDirection())
+            resampler.SetInterpolator(sitk.sitkNearestNeighbor)  # 使用最近邻插值以保持标签的离散性
+            
+            # 执行重采样
+            resampled_label = resampler.Execute(original_label)
+            label_array = sitk.GetArrayFromImage(resampled_label)
+            label_array = label_array[np.newaxis, ...]  # 重新添加通道维度
+        
         # 标签预处理：二值化
         label_array = (label_array > 0).astype(np.float32)
         
