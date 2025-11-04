@@ -370,7 +370,7 @@ class ProstateDataset(Dataset):
 
 def get_dataloader(data_dir, batch_size=2, shuffle=True, modalities=None, 
                    missing_strategy='zero_fill', target_size=(128, 128, 128), 
-                   num_workers=4, is_training=True, data_type='BPH', indices=None):
+                   num_workers=0, is_training=True, data_type='BPH', indices=None):
     """
     创建数据加载器
     

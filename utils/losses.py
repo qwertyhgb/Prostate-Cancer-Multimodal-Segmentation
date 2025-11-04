@@ -63,6 +63,10 @@ class DiceLoss(nn.Module):
         4. 计算Dice系数
         5. 返回1 - Dice系数作为损失
         """
+        # 检查预测值和目标值的形状是否匹配
+        if pred.shape != target.shape:
+            raise ValueError(f"预测值和目标值的形状不匹配: pred.shape={pred.shape}, target.shape={target.shape}")
+        
         # 对预测值应用sigmoid激活函数，将值映射到[0,1]区间
         # 确保预测值表示概率，便于与二值标签比较
         pred = torch.sigmoid(pred)

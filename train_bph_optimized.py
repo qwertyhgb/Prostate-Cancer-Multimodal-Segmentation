@@ -228,7 +228,8 @@ class CrossValidationTrainer:
             data_type=self.config.get('data_type', 'BPH'),
             indices=train_indices,
             missing_strategy=self.handle_missing,
-            is_training=True
+            is_training=True,
+            num_workers=0  # 显式设置为0以避免在某些系统上出现警告
         )
         
         val_loader = get_dataloader(
@@ -237,7 +238,8 @@ class CrossValidationTrainer:
             data_type=self.config.get('data_type', 'BPH'),
             indices=val_indices,
             missing_strategy=self.handle_missing,
-            is_training=False
+            is_training=False,
+            num_workers=0  # 显式设置为0以避免在某些系统上出现警告
         )
         
         # 训练循环
@@ -258,6 +260,19 @@ class CrossValidationTrainer:
                     # 前向传播
                     optimizer.zero_grad()
                     outputs = model(images)
+                    
+                    # 确保输出和标签的形状匹配
+                    if outputs.shape != labels.shape:
+                        print(f"警告: 输出和标签形状不匹配. 输出: {outputs.shape}, 标签: {labels.shape}")
+                        # 调整标签形状以匹配输出
+                        if len(labels.shape) != len(outputs.shape):
+                            # 如果标签缺少通道维度，则添加
+                            if len(labels.shape) == 4 and len(outputs.shape) == 5:
+                                labels = labels.unsqueeze(1)  # 添加通道维度
+                            elif len(labels.shape) == 5 and len(outputs.shape) == 4:
+                                outputs = outputs.unsqueeze(1)  # 添加通道维度
+                        print(f"调整后 - 输出: {outputs.shape}, 标签: {labels.shape}")
+                    
                     loss = criterion(outputs, labels)
                     
                     # 反向传播
@@ -280,6 +295,19 @@ class CrossValidationTrainer:
                         labels = batch['label'].to(self.device)
                         
                         outputs = model(images)
+                        
+                        # 确保输出和标签的形状匹配
+                        if outputs.shape != labels.shape:
+                            print(f"警告: 输出和标签形状不匹配. 输出: {outputs.shape}, 标签: {labels.shape}")
+                            # 调整标签形状以匹配输出
+                            if len(labels.shape) != len(outputs.shape):
+                                # 如果标签缺少通道维度，则添加
+                                if len(labels.shape) == 4 and len(outputs.shape) == 5:
+                                    labels = labels.unsqueeze(1)  # 添加通道维度
+                                elif len(labels.shape) == 5 and len(outputs.shape) == 4:
+                                    outputs = outputs.unsqueeze(1)  # 添加通道维度
+                            print(f"调整后 - 输出: {outputs.shape}, 标签: {labels.shape}")
+                        
                         loss = criterion(outputs, labels)
                         val_loss += loss.item()
                         
