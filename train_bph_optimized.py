@@ -440,7 +440,7 @@ def main():
     # 基础配置
     config = {
         'data_dir': 'data',
-        'num_epochs': 100,
+        'num_epochs': 10,
         'batch_size': 1,
         'learning_rate': 1e-4,
         'device': 'cuda' if torch.cuda.is_available() else 'cpu',
