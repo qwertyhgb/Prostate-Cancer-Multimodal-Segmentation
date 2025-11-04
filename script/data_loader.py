@@ -433,7 +433,7 @@ def get_kfold_splits(data_dir, n_splits=5, modalities=None,
     """
     # 直接获取病例数量，避免创建完整的数据集实例
     # 通过扫描数据目录来获取病例数量
-    case_ids = _get_case_list(data_dir, data_type)
+    case_ids = _get_case_list_function(data_dir, data_type)
     n_cases = len(case_ids)
     
     # 使用KFold进行数据划分
@@ -445,3 +445,43 @@ def get_kfold_splits(data_dir, n_splits=5, modalities=None,
     
     print(f"生成 {n_splits} 折交叉验证划分，共 {n_cases} 个病例")
     return splits
+
+def _get_case_list_function(data_dir, data_type='BPH'):
+    """
+    扫描数据目录，获取所有病例ID列表
+    
+    参数:
+        data_dir (str): 数据根目录路径
+        data_type (str): 数据类型 ('BPH' 或 'PCA')
+        
+    返回:
+        list: 病例ID列表
+    """
+    # 构建ADC目录路径
+    adc_dir = os.path.join(data_dir, 'BPH-PCA', data_type, 'ADC')
+    
+    # 检查目录是否存在
+    if not os.path.exists(adc_dir):
+        print(f"警告: ADC目录不存在: {adc_dir}")
+        return []
+    
+    # 获取所有.nii文件
+    nii_files = glob.glob(os.path.join(adc_dir, '*.nii'))
+    nii_gz_files = glob.glob(os.path.join(adc_dir, '*.nii.gz'))
+    all_files = nii_files + nii_gz_files
+    
+    # 提取病例ID（文件名不带扩展名）
+    case_ids = []
+    for file_path in all_files:
+        filename = os.path.basename(file_path)
+        # 移除扩展名
+        if filename.endswith('.nii.gz'):
+            case_id = filename[:-7]  # 移除 '.nii.gz'
+        elif filename.endswith('.nii'):
+            case_id = filename[:-4]   # 移除 '.nii'
+        else:
+            continue
+        case_ids.append(case_id)
+    
+    print(f"扫描到 {len(case_ids)} 个病例文件")
+    return case_ids
