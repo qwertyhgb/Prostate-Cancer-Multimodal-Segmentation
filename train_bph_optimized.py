@@ -119,7 +119,7 @@ class CrossValidationTrainer:
             config['data_dir'],
             data_type=config.get('data_type', 'BPH'),
             n_splits=self.n_splits,
-            handle_missing_modalities=self.handle_missing
+            missing_strategy=self.handle_missing
         )
         
         # 记录每折的结果
@@ -227,19 +227,19 @@ class CrossValidationTrainer:
         train_loader = get_dataloader(
             self.config['data_dir'],
             batch_size=self.config['batch_size'],
-            mode='train',
             data_type=self.config.get('data_type', 'BPH'),
             indices=train_indices,
-            handle_missing_modalities=self.handle_missing
+            missing_strategy=self.handle_missing,
+            is_training=True
         )
         
         val_loader = get_dataloader(
             self.config['data_dir'],
             batch_size=self.config['batch_size'],
-            mode='test',
             data_type=self.config.get('data_type', 'BPH'),
             indices=val_indices,
-            handle_missing_modalities=self.handle_missing
+            missing_strategy=self.handle_missing,
+            is_training=False
         )
         
         # 训练循环

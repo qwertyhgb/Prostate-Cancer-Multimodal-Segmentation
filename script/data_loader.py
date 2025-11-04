@@ -333,7 +333,7 @@ class ProstateDataset(Dataset):
 
 def get_dataloader(data_dir, batch_size=2, shuffle=True, modalities=None, 
                    missing_strategy='zero_fill', target_size=(128, 128, 128), 
-                   num_workers=4, is_training=True):
+                   num_workers=4, is_training=True, data_type='BPH', indices=None):
     """
     创建数据加载器
     
@@ -346,6 +346,8 @@ def get_dataloader(data_dir, batch_size=2, shuffle=True, modalities=None,
         target_size (tuple): 目标图像尺寸
         num_workers (int): 数据加载工作进程数
         is_training (bool): 是否为训练模式
+        data_type (str): 数据类型 ('BPH' 或 'PCA')
+        indices (list): 指定使用的数据索引列表（用于交叉验证）
         
     返回:
         DataLoader: PyTorch数据加载器
@@ -359,6 +361,11 @@ def get_dataloader(data_dir, batch_size=2, shuffle=True, modalities=None,
         is_training=is_training
     )
     
+    # 如果指定了索引，则使用Subset创建子数据集
+    if indices is not None:
+        from torch.utils.data import Subset
+        dataset = Subset(dataset, indices)
+    
     # 创建数据加载器
     dataloader = DataLoader(
         dataset,
@@ -371,7 +378,7 @@ def get_dataloader(data_dir, batch_size=2, shuffle=True, modalities=None,
     return dataloader
 
 def get_kfold_splits(data_dir, n_splits=5, modalities=None, 
-                    missing_strategy='zero_fill', target_size=(128, 128, 128)):
+                    missing_strategy='zero_fill', target_size=(128, 128, 128), data_type='BPH'):
     """
     生成K折交叉验证的数据划分
     
@@ -381,6 +388,7 @@ def get_kfold_splits(data_dir, n_splits=5, modalities=None,
         modalities (list): 模态列表
         missing_strategy (str): 缺失模态处理策略
         target_size (tuple): 目标图像尺寸
+        data_type (str): 数据类型 ('BPH' 或 'PCA')
         
     返回:
         list: 包含K个(train_indices, val_indices)元组的列表
