@@ -486,7 +486,7 @@ def main():
     config = {
         'data_dir': 'data',
         'num_epochs': 10,
-        'batch_size': 1,
+        'batch_size': 8,
         'learning_rate': 1e-4,
         'device': 'cuda' if torch.cuda.is_available() else 'cpu',
         'data_type': 'BPH',  # 指定使用BPH数据进行训练
