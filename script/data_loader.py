@@ -61,38 +61,39 @@ class ProstateDataset(Dataset):
 
     def _get_case_list(self):
         """
-        扫描数据目录，获取所有病例文件夹列表
+        扫描数据目录，获取所有病例文件列表
         
         返回:
-            list: 病例文件夹名称列表
-            
-        扫描规则：
-        - 只扫描直接子目录
-        - 排除隐藏文件和系统文件
-        - 每个病例对应一个独立的文件夹
-        - 根据data_type参数过滤病例
+            list: 病例文件名列表（不带扩展名）
         """
-        # 获取数据目录下的所有子目录
-        all_items = os.listdir(self.data_dir)
-        # 过滤出目录项，排除文件
-        case_dirs = [item for item in all_items 
-                    if os.path.isdir(os.path.join(self.data_dir, item))]
-        # 排除隐藏文件和系统文件
-        case_dirs = [case for case in case_dirs if not case.startswith('.')]
+        # 构建ADC目录路径
+        adc_dir = os.path.join(self.data_dir, 'BPH-PCA', self.data_type, 'ADC')
         
-        # 根据data_type参数过滤病例
-        if self.data_type == 'BPH':
-            # 对于BPH数据，我们假设病例文件夹名包含'BPH'或不包含'PCA'
-            filtered_cases = [case for case in case_dirs if 'BPH' in case.upper() or 'PCA' not in case.upper()]
-        elif self.data_type == 'PCA':
-            # 对于PCA数据，我们假设病例文件夹名包含'PCA'
-            filtered_cases = [case for case in case_dirs if 'PCA' in case.upper()]
-        else:
-            # 默认情况下，返回所有病例
-            filtered_cases = case_dirs
+        # 检查目录是否存在
+        if not os.path.exists(adc_dir):
+            print(f"警告: ADC目录不存在: {adc_dir}")
+            return []
         
-        print(f"扫描到 {len(case_dirs)} 个病例文件夹，根据数据类型 '{self.data_type}' 过滤后剩余 {len(filtered_cases)} 个")
-        return filtered_cases
+        # 获取所有.nii文件
+        nii_files = glob.glob(os.path.join(adc_dir, '*.nii'))
+        nii_gz_files = glob.glob(os.path.join(adc_dir, '*.nii.gz'))
+        all_files = nii_files + nii_gz_files
+        
+        # 提取病例ID（文件名不带扩展名）
+        case_ids = []
+        for file_path in all_files:
+            filename = os.path.basename(file_path)
+            # 移除扩展名
+            if filename.endswith('.nii.gz'):
+                case_id = filename[:-7]  # 移除 '.nii.gz'
+            elif filename.endswith('.nii'):
+                case_id = filename[:-4]   # 移除 '.nii'
+            else:
+                continue
+            case_ids.append(case_id)
+        
+        print(f"扫描到 {len(case_ids)} 个病例文件")
+        return case_ids
 
     def _filter_cases(self):
         """
@@ -102,40 +103,53 @@ class ProstateDataset(Dataset):
             list: 过滤后的有效病例列表
             
         过滤标准：
-        - 必须包含标签文件 (segmentation.nii.gz)
+        - 必须包含标签文件
         - 根据缺失模态策略决定是否保留
         - 检查模态文件的完整性和可读性
         """
         valid_cases = []
         
-        for case in self.case_list:
-            case_path = os.path.join(self.data_dir, case)
-            
-            # 检查标签文件是否存在
-            label_path = os.path.join(case_path, 'segmentation.nii.gz')
-            if not os.path.exists(label_path):
-                print(f"警告: 病例 {case} 缺少标签文件，已跳过")
-                continue
-            
-            # 检查模态文件
+        for case_id in self.case_list:
+            # 构建各模态文件路径
             modality_files = {}
             missing_modalities = []
             
             for modality in self.modalities:
-                # 构建模态文件路径模式
-                pattern = os.path.join(case_path, f"*{modality}*.nii*")
-                files = glob.glob(pattern)
+                # 构建模态文件路径
+                modality_file = os.path.join(
+                    self.data_dir, 'BPH-PCA', self.data_type, modality, f"{case_id}.nii"
+                )
+                modality_file_gz = os.path.join(
+                    self.data_dir, 'BPH-PCA', self.data_type, modality, f"{case_id}.nii.gz"
+                )
                 
-                if files:
-                    # 取第一个匹配的文件
-                    modality_files[modality] = files[0]
+                if os.path.exists(modality_file):
+                    modality_files[modality] = modality_file
+                elif os.path.exists(modality_file_gz):
+                    modality_files[modality] = modality_file_gz
                 else:
                     missing_modalities.append(modality)
+            
+            # 构建标签文件路径
+            label_file = os.path.join(
+                self.data_dir, 'BPH-PCA', 'ROI(BPH+PCA)', self.data_type, f"{case_id}.nii"
+            )
+            label_file_gz = os.path.join(
+                self.data_dir, 'BPH-PCA', 'ROI(BPH+PCA)', self.data_type, f"{case_id}.nii.gz"
+            )
+            
+            if os.path.exists(label_file):
+                label_path = label_file
+            elif os.path.exists(label_file_gz):
+                label_path = label_file_gz
+            else:
+                print(f"警告: 病例 {case_id} 缺少标签文件，已跳过")
+                continue
             
             # 根据缺失模态策略处理
             if missing_modalities:
                 if self.missing_strategy == 'skip':
-                    print(f"警告: 病例 {case} 缺失模态 {missing_modalities}，已跳过")
+                    print(f"警告: 病例 {case_id} 缺失模态 {missing_modalities}，已跳过")
                     continue
                 elif self.missing_strategy == 'duplicate':
                     # 用第一个可用模态复制填充缺失模态
@@ -144,9 +158,9 @@ class ProstateDataset(Dataset):
                         duplicate_modality = available_modalities[0]
                         for missing_mod in missing_modalities:
                             modality_files[missing_mod] = modality_files[duplicate_modality]
-                        print(f"信息: 病例 {case} 缺失模态 {missing_modalities}，已用 {duplicate_modality} 复制填充")
+                        print(f"信息: 病例 {case_id} 缺失模态 {missing_modalities}，已用 {duplicate_modality} 复制填充")
                     else:
-                        print(f"警告: 病例 {case} 所有模态都缺失，已跳过")
+                        print(f"警告: 病例 {case_id} 所有模态都缺失，已跳过")
                         continue
                 # 'zero_fill' 策略在加载时处理
             
@@ -158,13 +172,21 @@ class ProstateDataset(Dataset):
                     reader.SetFileName(file_path)
                     reader.ReadImageInformation()
             except Exception as e:
-                print(f"警告: 病例 {case} 的模态文件读取失败: {e}，已跳过")
+                print(f"警告: 病例 {case_id} 的模态文件读取失败: {e}，已跳过")
+                continue
+                
+            # 检查标签文件是否可读
+            try:
+                reader = sitk.ImageFileReader()
+                reader.SetFileName(label_path)
+                reader.ReadImageInformation()
+            except Exception as e:
+                print(f"警告: 病例 {case_id} 的标签文件读取失败: {e}，已跳过")
                 continue
             
             # 记录有效病例及其模态文件信息
             valid_cases.append({
-                'case_id': case,
-                'case_path': case_path,
+                'case_id': case_id,
                 'modality_files': modality_files,
                 'label_path': label_path,
                 'missing_modalities': missing_modalities
