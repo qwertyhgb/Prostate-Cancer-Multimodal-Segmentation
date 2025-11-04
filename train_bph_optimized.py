@@ -181,14 +181,12 @@ class CrossValidationTrainer:
         - 监控指标: 验证损失 (mode='min')
         - 耐心值: 10个epoch
         - 降低因子: 0.5
-        - 详细输出: 启用
         """
         return optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, 
             mode='min', 
             patience=10, 
-            factor=0.5, 
-            verbose=True
+            factor=0.5
         )
         
     def train_fold(self, fold_idx, train_indices, val_indices):
