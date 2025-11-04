@@ -3,7 +3,12 @@
 """
 
 import os
+import sys
 import torch
+
+# 添加项目根目录到Python路径
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from script.data_loader import get_dataloader
 
 def test_missing_modality_handling():

@@ -3,6 +3,7 @@ import torch
 import numpy as np
 from tqdm import tqdm
 from models.unet3d import UNet3D
+from utils.losses import DiceLoss
 from script.data_loader import get_dataloader
 import SimpleITK as sitk
 from datetime import datetime

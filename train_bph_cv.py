@@ -4,57 +4,13 @@ import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
 from models.unet3d import UNet3D
+from utils.losses import DiceLoss
 from script.data_loader import get_dataloader, get_kfold_splits
 import numpy as np
 from datetime import datetime
 import json
 
-class DiceLoss(nn.Module):
-    """Dice损失函数
-    
-    用于评估分割预测与真实标签之间的相似度
-    Dice系数越接近1，表示预测结果与真实标签越相似
-    """
-    def __init__(self, smooth=1.0):
-        """
-        初始化Dice损失函数
-        
-        参数:
-            smooth (float): 平滑因子，防止分母为0，默认为1.0
-        """
-        super(DiceLoss, self).__init__()
-        # 平滑因子，防止分母为0
-        self.smooth = smooth
-        
-    def forward(self, pred, target):
-        """
-        前向传播计算Dice损失
-        
-        参数:
-            pred (torch.Tensor): 预测结果
-            target (torch.Tensor): 真实标签
-            
-        返回:
-            torch.Tensor: Dice损失值
-        """
-        # 对预测结果应用sigmoid函数，将其转换为概率值
-        pred = torch.sigmoid(pred)
-        
-        # 展平预测值和目标值，便于计算
-        pred = pred.view(-1)
-        target = target.view(-1)
-        
-        # 计算预测值和目标值的交集
-        intersection = (pred * target).sum()
-        
-        # 计算Dice系数
-        # Dice = 2 * |X ∩ Y| / (|X| + |Y|)
-        dice = (2. * intersection + self.smooth) / (
-            pred.sum() + target.sum() + self.smooth
-        )
-        
-        # 返回Dice损失（1 - Dice系数）
-        return 1 - dice
+
 
 class BPHCVTrainer:
     """BPH数据专用模型训练器（交叉验证版本）

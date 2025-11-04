@@ -96,7 +96,7 @@ class ProstateDataset(Dataset):
                         break
                 
                 # 检查标签是否存在
-                label_path = os.path.join(self.root_dir, 'BPH-PCA', f'ROI（{self.data_type}+PCA）', 
+                label_path = os.path.join(self.root_dir, 'BPH-PCA', f'ROI({self.data_type}+PCA)', 
                                          self.data_type, f"{case_id}.nii")
                 label_exists = os.path.exists(label_path)
                 
@@ -109,7 +109,7 @@ class ProstateDataset(Dataset):
             # 其他策略过滤掉没有标签的病例
             filtered_cases = []
             for case_id in cases:
-                label_path = os.path.join(self.root_dir, 'BPH-PCA', f'ROI（{self.data_type}+PCA）', 
+                label_path = os.path.join(self.root_dir, 'BPH-PCA', f'ROI({self.data_type}+PCA)', 
                                          self.data_type, f"{case_id}.nii")
                 if os.path.exists(label_path):
                     filtered_cases.append(case_id)
@@ -289,7 +289,7 @@ class ProstateDataset(Dataset):
         
         # 加载分割标签
         # 标签文件存储在特定目录中
-        label_path = os.path.join(self.root_dir, 'BPH-PCA', f'ROI（{self.data_type}+PCA）', 
+        label_path = os.path.join(self.root_dir, 'BPH-PCA', f'ROI({self.data_type}+PCA)', 
                                  self.data_type, f"{case_id}.nii")
         
         try:
